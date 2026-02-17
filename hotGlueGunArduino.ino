@@ -29,6 +29,8 @@ static constexpr uint8_t PIN_ENCODER_A = 2;
 static constexpr uint8_t PIN_PHOTOCELL = 3;
 static constexpr uint8_t PIN_GUN1 = 8;
 static constexpr uint8_t PIN_GUN2 = 9;
+static constexpr uint8_t PIN_OUT10 = 10;
+static constexpr uint8_t PIN_OUT11 = 11;
 
 struct Line {
   float start_mm;
@@ -102,6 +104,10 @@ static bool g_calib_armed = false;
 static bool g_calib_waiting_for_second = false;
 static float g_calib_paper_length_mm = 0.0f;
 static uint32_t g_calib_pulse_start = 0;
+
+// Encoder reporting
+static uint32_t g_encoder_report_last_ms = 0;
+static uint32_t g_encoder_reported_total = 0;
 
 static uint16_t crc16_update(uint16_t crc, uint8_t data) {
   crc ^= data;
@@ -214,7 +220,10 @@ static void setGunOutputs(bool gun1_on, bool gun2_on) {
   digitalWrite(PIN_GUN2, gun2_on ? HIGH : LOW);
 }
 
-static bool photocellFallingEdgeDebounced() {
+static bool photocellEdgeDebounced(bool &rising, bool &falling) {
+  rising = false;
+  falling = false;
+
   bool raw = (digitalRead(PIN_PHOTOCELL) == HIGH);
   uint32_t now = millis();
 
@@ -227,13 +236,22 @@ static bool photocellFallingEdgeDebounced() {
     if (g_photo_stable != raw) {
       bool prev = g_photo_stable;
       g_photo_stable = raw;
-      if (prev == true && g_photo_stable == false) {
-        return true;
-      }
+      rising = (prev == false && g_photo_stable == true);
+      falling = (prev == true && g_photo_stable == false);
+      return true;
     }
   }
 
   return false;
+}
+
+static void sendEvent(const char *event, const char *cmd = nullptr, const char *reason = nullptr) {
+  StaticJsonDocument<192> out;
+  out["event"] = event;
+  if (cmd && cmd[0]) out["cmd"] = cmd;
+  if (reason && reason[0]) out["reason"] = reason;
+  serializeJson(out, Serial);
+  Serial.print('\n');
 }
 
 static int8_t parseGunSelector(JsonVariant v) {
@@ -241,6 +259,8 @@ static int8_t parseGunSelector(JsonVariant v) {
     const char *s = v.as<const char *>();
     if (!s) return -1;
     if (strcmp(s, "both") == 0) return 3;
+    if (strcmp(s, "1") == 0) return 1;
+    if (strcmp(s, "2") == 0) return 2;
   }
   if (v.is<int>()) {
     int g = v.as<int>();
@@ -394,13 +414,15 @@ static void evaluateOutputs(bool &gun1_on, bool &gun2_on) {
   }
 }
 
-static void handlePhotocellEvent() {
+static void handlePhotocellEvent(bool rising, bool falling) {
   if (g_calib_armed) {
-    if (!g_calib_waiting_for_second) {
+    if (falling && !g_calib_waiting_for_second) {
       g_calib_pulse_start = g_encoder_pulses_total;
       g_calib_waiting_for_second = true;
       return;
-    } else {
+    }
+
+    if (rising && g_calib_waiting_for_second) {
       uint32_t measured = g_encoder_pulses_total - g_calib_pulse_start;
       if (g_calib_paper_length_mm > 0.001f) {
         g_cfg.pulses_per_mm = (float)measured / g_calib_paper_length_mm;
@@ -417,9 +439,11 @@ static void handlePhotocellEvent() {
       g_calib_waiting_for_second = false;
       return;
     }
+
+    return;
   }
 
-  if (!g_active) {
+  if (!falling || !g_active) {
     return;
   }
 
@@ -491,11 +515,15 @@ static void handleJsonLine(const char *line) {
   StaticJsonDocument<2048> doc;
   DeserializationError err = deserializeJson(doc, line);
   if (err) {
+    sendEvent("error", nullptr, "json_parse");
     return;
   }
 
   const char *cmd = doc["cmd"].as<const char *>();
-  if (!cmd) return;
+  if (!cmd) {
+    sendEvent("error", nullptr, "missing_cmd");
+    return;
+  }
 
   if (strcmp(cmd, "set_active") == 0) {
     bool a = doc["active"].as<bool>();
@@ -506,16 +534,19 @@ static void handleJsonLine(const char *line) {
       g_test_override_on[1] = false;
       setGunOutputs(false, false);
     }
+    sendEvent("ack", cmd);
     return;
   }
 
   if (strcmp(cmd, "set_config") == 0) {
     applySetConfig(doc);
+    sendEvent("ack", cmd);
     return;
   }
 
   if (strcmp(cmd, "set_pattern") == 0) {
     applySetPattern(doc);
+    sendEvent("ack", cmd);
     return;
   }
 
@@ -525,6 +556,9 @@ static void handleJsonLine(const char *line) {
       g_calib_paper_length_mm = len;
       g_calib_armed = true;
       g_calib_waiting_for_second = false;
+      sendEvent("ack", cmd);
+    } else {
+      sendEvent("error", cmd, "invalid_paper_length_mm");
     }
     return;
   }
@@ -536,6 +570,9 @@ static void handleJsonLine(const char *line) {
     if (timeout_ms > 600000UL) timeout_ms = 600000UL;
     if (which > 0) {
       handleTestOpen(which, timeout_ms);
+      sendEvent("ack", cmd);
+    } else {
+      sendEvent("error", cmd, "invalid_gun");
     }
     return;
   }
@@ -544,9 +581,14 @@ static void handleJsonLine(const char *line) {
     int8_t which = parseGunSelector(doc["gun"]);
     if (which > 0) {
       handleTestClose(which);
+      sendEvent("ack", cmd);
+    } else {
+      sendEvent("error", cmd, "invalid_gun");
     }
     return;
   }
+
+  sendEvent("error", cmd, "unknown_cmd");
 }
 
 static void serviceSerialJson() {
@@ -584,9 +626,18 @@ void setup() {
 
   pinMode(PIN_GUN1, OUTPUT);
   pinMode(PIN_GUN2, OUTPUT);
+  pinMode(PIN_OUT10, OUTPUT);
+  pinMode(PIN_OUT11, OUTPUT);
+
   setGunOutputs(false, false);
+  digitalWrite(PIN_OUT10, LOW);
+  digitalWrite(PIN_OUT11, LOW);
 
   Serial.begin(115200);
+  delay(200);
+  sendEvent("ready");
+  g_encoder_report_last_ms = millis();
+  g_encoder_reported_total = g_encoder_pulses_total;
 
   loadConfig();
   clearSheets();
@@ -599,6 +650,8 @@ void setup() {
 }
 
 void loop() {
+  uint32_t now = millis();
+
   serviceSerialJson();
   serviceTestOverrides();
 
@@ -621,8 +674,22 @@ void loop() {
     updateSheetsByDelta(0.0f);
   }
 
-  if (photocellFallingEdgeDebounced()) {
-    handlePhotocellEvent();
+  if ((uint32_t)(now - g_encoder_report_last_ms) >= 200) {
+    g_encoder_report_last_ms = now;
+    if (g_encoder_pulses_total != g_encoder_reported_total) {
+      g_encoder_reported_total = g_encoder_pulses_total;
+      StaticJsonDocument<96> out;
+      out["event"] = "encoder";
+      out["pulses"] = g_encoder_pulses_total;
+      serializeJson(out, Serial);
+      Serial.print('\n');
+    }
+  }
+
+  bool photoRising = false;
+  bool photoFalling = false;
+  if (photocellEdgeDebounced(photoRising, photoFalling)) {
+    handlePhotocellEvent(photoRising, photoFalling);
   }
 
   bool gun1_req = false;

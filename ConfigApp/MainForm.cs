@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO.Ports;
 using System.Text.Json;
+using System.Text;
 
 namespace GlueConfigApp;
 
@@ -14,25 +15,24 @@ public sealed class MainForm : Form
     private readonly Button _refreshPortsButton = new() { Text = "Refresh Ports" };
     private readonly Button _connectButton = new() { Text = "Connect" };
     private readonly Label _statusLabel = new() { Text = "Disconnected", AutoSize = true };
+    private readonly Label _programStateLabel = new() { AutoSize = true, Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
 
     private readonly NumericUpDown _pulsesPerMm = new() { DecimalPlaces = 4, Minimum = 0.0001M, Maximum = 100000M, Value = 10M, Increment = 0.1M };
     private readonly NumericUpDown _maxMsPerMm = new() { DecimalPlaces = 0, Minimum = 1, Maximum = 60000, Value = 100 };
     private readonly NumericUpDown _photocellOffset = new() { DecimalPlaces = 2, Minimum = -5000, Maximum = 5000, Value = 0, Increment = 1 };
     private readonly NumericUpDown _debounceMs = new() { DecimalPlaces = 0, Minimum = 0, Maximum = 1000, Value = 20 };
 
-    private readonly Button _sendConfigButton = new() { Text = "Send Config" };
-    private readonly Button _sendPatternsButton = new() { Text = "Send Patterns" };
-    private readonly Button _sendAllButton = new() { Text = "Send All" };
+    private readonly Button _sendAllButton = new() { Text = "Send All (Config + Patterns)" };
 
     private readonly Button _activateButton = new() { Text = "Activate" };
     private readonly Button _deactivateButton = new() { Text = "Deactivate" };
 
-    private readonly Button _testOpenGun1Button = new() { Text = "Test Open Gun 1" };
-    private readonly Button _testCloseGun1Button = new() { Text = "Test Close Gun 1" };
-    private readonly Button _testOpenGun2Button = new() { Text = "Test Open Gun 2" };
-    private readonly Button _testCloseGun2Button = new() { Text = "Test Close Gun 2" };
-    private readonly Button _testOpenBothButton = new() { Text = "Test Open Both" };
-    private readonly Button _testCloseBothButton = new() { Text = "Test Close Both" };
+    private readonly Button _testOpenGun1Button = new() { Text = "Test 1" };
+    private readonly Button _testCloseGun1Button = new() { Text = "Close 1" };
+    private readonly Button _testOpenGun2Button = new() { Text = "Test 2" };
+    private readonly Button _testCloseGun2Button = new() { Text = "Close 2" };
+    private readonly Button _testOpenBothButton = new() { Text = "Test Both" };
+    private readonly Button _testCloseBothButton = new() { Text = "Close Both" };
 
     private readonly NumericUpDown _calibPaperLength = new() { DecimalPlaces = 2, Minimum = 1, Maximum = 10000, Value = 297, Increment = 1 };
     private readonly Button _calibArmButton = new() { Text = "Arm Calibration" };
@@ -64,6 +64,16 @@ public sealed class MainForm : Form
     private readonly BindingList<PatternLine> _gun2Lines = new();
 
     private SerialPort? _serial;
+    private readonly StringBuilder _serialRxBuffer = new();
+    private readonly System.Windows.Forms.Timer _serialPollTimer = new() { Interval = 100 };
+    private bool _hasUnsavedChanges;
+    private bool _hasUnsentChanges;
+    private bool _suspendDirtyTracking;
+
+    private static readonly string AppStateDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GlueConfigApp");
+    private static readonly string AppStateFilePath = Path.Combine(AppStateDirectory, "last_state.json");
 
     public MainForm()
     {
@@ -80,13 +90,46 @@ public sealed class MainForm : Form
         _gun1Lines.ListChanged += (_, _) => RefreshPreviews();
         _gun2Lines.ListChanged += (_, _) => RefreshPreviews();
 
+        _pulsesPerMm.ValueChanged += (_, _) => MarkConfigChanged();
+        _maxMsPerMm.ValueChanged += (_, _) => MarkConfigChanged();
+        _photocellOffset.ValueChanged += (_, _) => MarkConfigChanged();
+        _debounceMs.ValueChanged += (_, _) => MarkConfigChanged();
+        _calibPaperLength.ValueChanged += (_, _) => MarkConfigChanged();
+
+        _gun1Lines.ListChanged += (_, _) => MarkPatternChanged();
+        _gun2Lines.ListChanged += (_, _) => MarkPatternChanged();
+
         RefreshSerialPorts();
         RefreshPreviews();
+        LoadLastAppState();
+        UpdateProgramStateUi();
+    }
+
+    private void PollSerial()
+    {
+        try
+        {
+            if (_serial?.IsOpen != true)
+            {
+                return;
+            }
+
+            var text = _serial.ReadExisting();
+            if (!string.IsNullOrEmpty(text))
+            {
+                AppendSerialText(text);
+            }
+        }
+        catch
+        {
+            // Ignore transient serial read errors.
+        }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         base.OnFormClosing(e);
+        SaveLastAppState();
         DisconnectSerial();
     }
 
@@ -118,6 +161,8 @@ public sealed class MainForm : Form
         connectionPanel.Controls.Add(_connectButton);
         connectionPanel.Controls.Add(new Label { Text = "Status:", AutoSize = true, Margin = new Padding(20, 7, 6, 0) });
         connectionPanel.Controls.Add(_statusLabel);
+        connectionPanel.Controls.Add(new Label { Text = "Program:", AutoSize = true, Margin = new Padding(20, 7, 6, 0) });
+        connectionPanel.Controls.Add(_programStateLabel);
 
         var middle = new TableLayoutPanel
         {
@@ -168,9 +213,8 @@ public sealed class MainForm : Form
         panel.Controls.Add(new Label { Text = "Debounce (ms)", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
         panel.Controls.Add(_debounceMs, 1, 3);
 
-        panel.Controls.Add(_sendConfigButton, 0, 5);
-        panel.Controls.Add(_sendPatternsButton, 1, 5);
-        panel.Controls.Add(_sendAllButton, 0, 6);
+        panel.Controls.Add(_sendAllButton, 0, 5);
+        panel.SetColumnSpan(_sendAllButton, 2);
 
         panel.Controls.Add(_activateButton, 0, 8);
         panel.Controls.Add(_deactivateButton, 1, 8);
@@ -278,8 +322,6 @@ public sealed class MainForm : Form
         _refreshPortsButton.Click += (_, _) => RefreshSerialPorts();
         _connectButton.Click += (_, _) => ToggleConnection();
 
-        _sendConfigButton.Click += (_, _) => SendSetConfig();
-        _sendPatternsButton.Click += (_, _) => SendPatterns();
         _sendAllButton.Click += (_, _) => { SendSetConfig(); SendPatterns(); };
 
         _activateButton.Click += (_, _) => SendJson(new { cmd = "set_active", active = true });
@@ -302,8 +344,14 @@ public sealed class MainForm : Form
         _gun1RemoveLineButton.Click += (_, _) => RemoveSelectedLine(_gun1Grid, _gun1Lines);
         _gun2RemoveLineButton.Click += (_, _) => RemoveSelectedLine(_gun2Grid, _gun2Lines);
 
-        _gun1Grid.CellEndEdit += (_, _) => RefreshPreviews();
-        _gun2Grid.CellEndEdit += (_, _) => RefreshPreviews();
+        _gun1Grid.CellEndEdit += (_, _) => { NormalizePattern(_gun1Lines); RefreshPreviews(); };
+        _gun2Grid.CellEndEdit += (_, _) => { NormalizePattern(_gun2Lines); RefreshPreviews(); };
+        _gun1Grid.CellValueChanged += (_, _) => RefreshPreviews();
+        _gun2Grid.CellValueChanged += (_, _) => RefreshPreviews();
+        _gun1Grid.DataError += (_, e) => e.ThrowException = false;
+        _gun2Grid.DataError += (_, e) => e.ThrowException = false;
+
+        _serialPollTimer.Tick += (_, _) => PollSerial();
     }
 
     private void RefreshSerialPorts()
@@ -344,14 +392,20 @@ public sealed class MainForm : Form
             {
                 NewLine = "\n",
                 ReadTimeout = 1000,
-                WriteTimeout = 1000
+                WriteTimeout = 1000,
+                DtrEnable = true,
+                RtsEnable = true,
+                Handshake = Handshake.None
             };
             _serial.DataReceived += SerialDataReceived;
             _serial.Open();
+            _serial.DiscardInBuffer();
+            _serial.DiscardOutBuffer();
+            _serialPollTimer.Start();
 
             _connectButton.Text = "Disconnect";
             _statusLabel.Text = $"Connected ({port})";
-            AppendLog($"Connected to {port}");
+            AppendLog($"Connected to {port}; waiting for device messages...");
         }
         catch (Exception ex)
         {
@@ -371,6 +425,7 @@ public sealed class MainForm : Form
 
         try
         {
+            _serialPollTimer.Stop();
             _serial.DataReceived -= SerialDataReceived;
             if (_serial.IsOpen)
             {
@@ -400,12 +455,73 @@ public sealed class MainForm : Form
             {
                 return;
             }
-
-            BeginInvoke(() => AppendLog($"RX {text.TrimEnd()}"));
+            BeginInvoke(() => AppendSerialText(text));
         }
         catch
         {
             // Ignore transient serial read errors.
+        }
+    }
+
+    private void AppendSerialText(string text)
+    {
+        _serialRxBuffer.Append(text);
+        while (true)
+        {
+            var current = _serialRxBuffer.ToString();
+            var newlineIndex = current.IndexOf('\n');
+            if (newlineIndex < 0)
+            {
+                break;
+            }
+
+            var line = current.Substring(0, newlineIndex).TrimEnd('\r');
+            _serialRxBuffer.Remove(0, newlineIndex + 1);
+            if (line.Length > 0)
+            {
+                AppendLog($"RX {line}");
+                HandleIncomingLine(line);
+            }
+        }
+    }
+
+    private void HandleIncomingLine(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("event", out var eventProp))
+            {
+                return;
+            }
+
+            var eventName = eventProp.GetString();
+            if (string.Equals(eventName, "calib_result", StringComparison.OrdinalIgnoreCase))
+            {
+                if (root.TryGetProperty("pulses_per_mm", out var ppmProp) && ppmProp.TryGetDouble(out var ppm))
+                {
+                    _suspendDirtyTracking = true;
+                    _pulsesPerMm.Value = ClampDecimal((decimal)ppm, _pulsesPerMm.Minimum, _pulsesPerMm.Maximum);
+                    _suspendDirtyTracking = false;
+                    _hasUnsentChanges = false;
+                    _hasUnsavedChanges = true;
+                    UpdateProgramStateUi();
+                    AppendLog($"Calibration complete. Updated pulses/mm to {ppm:0.####}");
+                }
+                return;
+            }
+
+            if (string.Equals(eventName, "ack", StringComparison.OrdinalIgnoreCase)
+                && root.TryGetProperty("cmd", out var cmdProp)
+                && string.Equals(cmdProp.GetString(), "calib_arm", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog("Calibration armed. Measurement starts on photocell falling edge and ends on rising edge.");
+            }
+        }
+        catch
+        {
+            // Not JSON or partial JSON line; already logged as RX text.
         }
     }
 
@@ -425,6 +541,9 @@ public sealed class MainForm : Form
 
     private void SendPatterns()
     {
+        NormalizeAllPatterns();
+        RefreshPatternViolationHighlights();
+
         if (!ValidateAllPatterns(out var validationError))
         {
             MessageBox.Show(validationError, "Pattern Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -434,6 +553,12 @@ public sealed class MainForm : Form
 
         SendSetPattern(1, _gun1Lines);
         SendSetPattern(2, _gun2Lines);
+
+        if (_serial?.IsOpen == true)
+        {
+            _hasUnsentChanges = false;
+            UpdateProgramStateUi();
+        }
     }
 
     private void SendCalibrationArm()
@@ -446,6 +571,7 @@ public sealed class MainForm : Form
         }
 
         SendJson(new { cmd = "calib_arm", paper_length_mm = paperLength });
+        AppendLog("Calibration request sent. Move sheet so photocell goes LOW then HIGH over the measured length.");
     }
 
     private void SendSetPattern(int gun, IEnumerable<PatternLine> lines)
@@ -483,6 +609,9 @@ public sealed class MainForm : Form
 
     private void SaveProgramToFile()
     {
+        NormalizeAllPatterns();
+        RefreshPatternViolationHighlights();
+
         if (!ValidateAllPatterns(out var validationError))
         {
             MessageBox.Show(validationError, "Pattern Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -511,6 +640,8 @@ public sealed class MainForm : Form
         var options = new JsonSerializerOptions { WriteIndented = true };
         File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(program, options));
         AppendLog($"Saved program to {dialog.FileName}");
+        _hasUnsavedChanges = false;
+        UpdateProgramStateUi();
     }
 
     private void LoadProgramFromFile()
@@ -544,6 +675,9 @@ public sealed class MainForm : Form
                 MessageBox.Show($"Program loaded with validation warnings:{Environment.NewLine}{validationError}", "Pattern Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 AppendLog($"VALIDATION WARNING {validationError}");
             }
+            _hasUnsavedChanges = false;
+            _hasUnsentChanges = true;
+            UpdateProgramStateUi();
             AppendLog($"Loaded program from {dialog.FileName}");
         }
         catch (Exception ex)
@@ -565,6 +699,8 @@ public sealed class MainForm : Form
 
     private void ApplyProgramToUi(GlueProgramFile program)
     {
+        var previousSuspend = _suspendDirtyTracking;
+        _suspendDirtyTracking = true;
         if (program.Config is not null)
         {
             _pulsesPerMm.Value = ClampDecimal((decimal)program.Config.PulsesPerMm, _pulsesPerMm.Minimum, _pulsesPerMm.Maximum);
@@ -576,7 +712,10 @@ public sealed class MainForm : Form
         ReplaceLines(_gun1Lines, program.Gun1Lines);
         ReplaceLines(_gun2Lines, program.Gun2Lines);
 
+        NormalizeAllPatterns();
+
         RefreshPreviews();
+        _suspendDirtyTracking = previousSuspend;
     }
 
     private static decimal ClampDecimal(decimal value, decimal min, decimal max)
@@ -618,6 +757,7 @@ public sealed class MainForm : Form
     {
         _gun1Preview.SetLines(_gun1Lines);
         _gun2Preview.SetLines(_gun2Lines);
+        RefreshPatternViolationHighlights();
     }
 
     private void TryAddLine(BindingList<PatternLine> lines, string gunName)
@@ -630,7 +770,228 @@ public sealed class MainForm : Form
             return;
         }
 
-        lines.Add(new PatternLine { StartMm = 0, EndMm = 10 });
+        NormalizePattern(lines);
+
+        var lastEnd = 0.0;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            lastEnd = Math.Max(lastEnd, Math.Max(lines[i].StartMm, lines[i].EndMm));
+        }
+
+        var start = Math.Min(MaxPatternMm, lastEnd + 1.0);
+        if (start >= MaxPatternMm)
+        {
+            var msg = $"{gunName} cannot add another line because the pattern already reached {MaxPatternMm:0.##} mm.";
+            MessageBox.Show(msg, "Pattern Limit", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            AppendLog($"VALIDATION ERROR {msg}");
+            return;
+        }
+
+        var end = Math.Min(MaxPatternMm, start + 10.0);
+        lines.Add(new PatternLine { StartMm = start, EndMm = end });
+    }
+
+    private void NormalizeAllPatterns()
+    {
+        NormalizePattern(_gun1Lines);
+        NormalizePattern(_gun2Lines);
+        RefreshPreviews();
+    }
+
+    private void RefreshPatternViolationHighlights()
+    {
+        ApplyPatternViolationHighlight(_gun1Grid, _gun1Lines);
+        ApplyPatternViolationHighlight(_gun2Grid, _gun2Lines);
+    }
+
+    private static void ApplyPatternViolationHighlight(DataGridView grid, IList<PatternLine> lines)
+    {
+        var invalidRows = ComputeInvalidRows(lines);
+        for (var row = 0; row < grid.Rows.Count; row++)
+        {
+            var rowStyle = grid.Rows[row].DefaultCellStyle;
+            var isInvalid = row < invalidRows.Length && invalidRows[row];
+            rowStyle.BackColor = isInvalid ? Color.MistyRose : Color.White;
+            rowStyle.ForeColor = Color.Black;
+        }
+    }
+
+    private static bool[] ComputeInvalidRows(IList<PatternLine> lines)
+    {
+        var invalid = new bool[lines.Count];
+        var ranges = new List<(double Lo, double Hi, int Row)>();
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var a = lines[i].StartMm;
+            var b = lines[i].EndMm;
+            if (double.IsNaN(a) || double.IsInfinity(a) || double.IsNaN(b) || double.IsInfinity(b))
+            {
+                invalid[i] = true;
+                continue;
+            }
+
+            var lo = Math.Min(a, b);
+            var hi = Math.Max(a, b);
+            if (lo < MinPatternMm || hi > MaxPatternMm)
+            {
+                invalid[i] = true;
+                continue;
+            }
+
+            ranges.Add((lo, hi, i));
+        }
+
+        ranges.Sort((x, y) => x.Lo.CompareTo(y.Lo));
+        for (var i = 1; i < ranges.Count; i++)
+        {
+            if (ranges[i].Lo < ranges[i - 1].Hi)
+            {
+                invalid[ranges[i].Row] = true;
+                invalid[ranges[i - 1].Row] = true;
+            }
+        }
+
+        return invalid;
+    }
+
+    private void MarkConfigChanged()
+    {
+        if (_suspendDirtyTracking)
+        {
+            return;
+        }
+
+        _hasUnsavedChanges = true;
+        _hasUnsentChanges = true;
+        UpdateProgramStateUi();
+    }
+
+    private void MarkPatternChanged()
+    {
+        if (_suspendDirtyTracking)
+        {
+            return;
+        }
+
+        _hasUnsavedChanges = true;
+        _hasUnsentChanges = true;
+        UpdateProgramStateUi();
+    }
+
+    private void UpdateProgramStateUi()
+    {
+        if (_hasUnsavedChanges || _hasUnsentChanges)
+        {
+            var parts = new List<string>();
+            if (_hasUnsentChanges) parts.Add("not sent");
+            if (_hasUnsavedChanges) parts.Add("not saved");
+            _programStateLabel.Text = "Modified (" + string.Join(", ", parts) + ")";
+            _programStateLabel.ForeColor = Color.DarkOrange;
+            return;
+        }
+
+        _programStateLabel.Text = "Synced";
+        _programStateLabel.ForeColor = Color.ForestGreen;
+    }
+
+    private GlueProgramFile BuildProgramFromUi()
+    {
+        return new GlueProgramFile
+        {
+            Config = GetConfigFromUi(),
+            Gun1Lines = _gun1Lines.Select(l => l.Clone()).ToList(),
+            Gun2Lines = _gun2Lines.Select(l => l.Clone()).ToList()
+        };
+    }
+
+    private void SaveLastAppState()
+    {
+        try
+        {
+            var state = new AppStateFile
+            {
+                Program = BuildProgramFromUi(),
+                LastPort = _portCombo.SelectedItem?.ToString(),
+                CalibrationPaperLengthMm = (double)_calibPaperLength.Value,
+                HasUnsentChanges = _hasUnsentChanges,
+                HasUnsavedChanges = _hasUnsavedChanges
+            };
+
+            Directory.CreateDirectory(AppStateDirectory);
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            File.WriteAllText(AppStateFilePath, JsonSerializer.Serialize(state, options));
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"State save warning: {ex.Message}");
+        }
+    }
+
+    private void LoadLastAppState()
+    {
+        if (!File.Exists(AppStateFilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(AppStateFilePath);
+            var state = JsonSerializer.Deserialize<AppStateFile>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            if (state is null)
+            {
+                return;
+            }
+
+            _suspendDirtyTracking = true;
+
+            if (state.Program is not null)
+            {
+                ApplyProgramToUi(state.Program);
+            }
+
+            _calibPaperLength.Value = ClampDecimal((decimal)state.CalibrationPaperLengthMm, _calibPaperLength.Minimum, _calibPaperLength.Maximum);
+
+            if (!string.IsNullOrWhiteSpace(state.LastPort) && _portCombo.Items.Contains(state.LastPort))
+            {
+                _portCombo.SelectedItem = state.LastPort;
+            }
+
+            _hasUnsentChanges = state.HasUnsentChanges;
+            _hasUnsavedChanges = state.HasUnsavedChanges;
+            _suspendDirtyTracking = false;
+            UpdateProgramStateUi();
+            RefreshPreviews();
+            AppendLog("Restored previous session state.");
+        }
+        catch (Exception ex)
+        {
+            _suspendDirtyTracking = false;
+            AppendLog($"State load warning: {ex.Message}");
+        }
+    }
+
+    private static void NormalizePattern(BindingList<PatternLine> lines)
+    {
+        var normalized = lines
+            .Select(l => new PatternLine
+            {
+                StartMm = Math.Min(l.StartMm, l.EndMm),
+                EndMm = Math.Max(l.StartMm, l.EndMm)
+            })
+            .OrderBy(l => l.StartMm)
+            .ThenBy(l => l.EndMm)
+            .ToList();
+
+        lines.Clear();
+        foreach (var line in normalized)
+        {
+            lines.Add(line);
+        }
     }
 
     private bool ValidateAllPatterns(out string error)
@@ -707,7 +1068,8 @@ public sealed class PatternPreviewPanel : Panel
 {
     private readonly List<PatternLine> _lines = new();
 
-    public Color PatternColor { get; init; } = Color.DarkOrange;
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Color PatternColor { get; set; } = Color.DarkOrange;
 
     public void SetLines(IEnumerable<PatternLine> lines)
     {
@@ -789,4 +1151,13 @@ public sealed class GlueProgramFile
     public DeviceConfig? Config { get; set; } = new();
     public List<PatternLine> Gun1Lines { get; set; } = new();
     public List<PatternLine> Gun2Lines { get; set; } = new();
+}
+
+public sealed class AppStateFile
+{
+    public GlueProgramFile? Program { get; set; } = new();
+    public string? LastPort { get; set; }
+    public double CalibrationPaperLengthMm { get; set; } = 297.0;
+    public bool HasUnsentChanges { get; set; }
+    public bool HasUnsavedChanges { get; set; }
 }
