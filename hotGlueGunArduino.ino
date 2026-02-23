@@ -252,6 +252,7 @@ static void sendEvent(const char *event, const char *cmd = nullptr, const char *
   if (reason && reason[0]) out["reason"] = reason;
   serializeJson(out, Serial);
   Serial.print('\n');
+  Serial.flush();
 }
 
 static int8_t parseGunSelector(JsonVariant v) {
@@ -433,6 +434,7 @@ static void handlePhotocellEvent(bool rising, bool falling) {
         out["pulses_per_mm"] = g_cfg.pulses_per_mm;
         serializeJson(out, Serial);
         Serial.print('\n');
+        Serial.flush();
       }
 
       g_calib_armed = false;
@@ -577,6 +579,17 @@ static void handleJsonLine(const char *line) {
     return;
   }
 
+  if (strcmp(cmd, "sw_trigger") == 0) {
+    if (!g_active) {
+      sendEvent("error", cmd, "not_active");
+      return;
+    }
+    addSheet();
+    g_current_mm = -g_cfg.photocell_offset_mm;
+    sendEvent("ack", cmd);
+    return;
+  }
+
   if (strcmp(cmd, "test_close") == 0) {
     int8_t which = parseGunSelector(doc["gun"]);
     if (which > 0) {
@@ -683,6 +696,7 @@ void loop() {
       out["pulses"] = g_encoder_pulses_total;
       serializeJson(out, Serial);
       Serial.print('\n');
+      Serial.flush();
     }
   }
 
