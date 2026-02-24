@@ -16,7 +16,16 @@ public sealed class MainForm : Form
     private readonly ComboBox _portCombo = new() { Width = 120, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Button _refreshPortsButton = new() { Text = "Refresh", Width = 70 };
     private readonly Button _connectButton = new() { Text = "Connect", Width = 90 };
-    private readonly Label _statusLabel = new() { Text = "Disconnected", AutoSize = true, ForeColor = Color.Gray };
+    private readonly Label _statusLabel = new()
+    {
+        Text = "  Disconnected  ",
+        AutoSize = true,
+        Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+        ForeColor = Color.White,
+        BackColor = Color.FromArgb(140, 140, 140),
+        Padding = new Padding(6, 3, 6, 3),
+        Margin = new Padding(6, 2, 0, 0)
+    };
     private readonly Label _activeIndicator = new()
     {
         Text = "  INACTIVE  ",
@@ -60,8 +69,7 @@ public sealed class MainForm : Form
     private readonly Button _gun1RemoveLineButton = new() { Text = "−", Width = 36 };
     private readonly Button _gun2AddLineButton = new() { Text = "+", Width = 36 };
     private readonly Button _gun2RemoveLineButton = new() { Text = "−", Width = 36 };
-    private readonly PatternPreviewPanel _gun1Preview = new() { PatternColor = Color.OrangeRed };
-    private readonly PatternPreviewPanel _gun2Preview = new() { PatternColor = Color.SteelBlue };
+    private readonly CombinedPreviewPanel _combinedPreview = new();
     private readonly BindingList<PatternLine> _gun1Lines = new();
     private readonly BindingList<PatternLine> _gun2Lines = new();
 
@@ -76,6 +84,19 @@ public sealed class MainForm : Form
         BackColor = Color.FromArgb(30, 30, 30),
         ForeColor = Color.FromArgb(200, 220, 200)
     };
+    private readonly Button _logToggleButton = new()
+    {
+        Text = "▶ Serial Log",
+        Dock = DockStyle.Top,
+        Height = 24,
+        FlatStyle = FlatStyle.Flat,
+        BackColor = Color.FromArgb(220, 222, 228),
+        TextAlign = ContentAlignment.MiddleLeft,
+        Padding = new Padding(4, 0, 0, 0)
+    };
+    private Panel _logPanel = null!;
+    private bool _logExpanded = false;
+    private TableLayoutPanel _rootLayout = null!;
 
     // ── State ──
     private SerialPort? _serial;
@@ -133,24 +154,24 @@ public sealed class MainForm : Form
 
     private void BuildLayout()
     {
-        var root = new TableLayoutPanel
+        _rootLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
             Padding = new Padding(6)
         };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // toolbar
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // config bar
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // main area
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 160));  // log
+        _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // toolbar
+        _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // config bar
+        _rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // main area
+        _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // log (collapsed by default)
 
-        root.Controls.Add(BuildToolbar(), 0, 0);
-        root.Controls.Add(BuildConfigBar(), 0, 1);
-        root.Controls.Add(BuildMainArea(), 0, 2);
-        root.Controls.Add(BuildLogPanel(), 0, 3);
+        _rootLayout.Controls.Add(BuildToolbar(), 0, 0);
+        _rootLayout.Controls.Add(BuildConfigBar(), 0, 1);
+        _rootLayout.Controls.Add(BuildMainArea(), 0, 2);
+        _rootLayout.Controls.Add(BuildLogPanel(), 0, 3);
 
-        Controls.Add(root);
+        Controls.Add(_rootLayout);
     }
 
     private Control BuildToolbar()
@@ -189,18 +210,19 @@ public sealed class MainForm : Form
             BackColor = Color.FromArgb(235, 237, 242)
         };
 
-        bar.Controls.Add(MakeLabel("Pulses/mm:"));
-        bar.Controls.Add(_pulsesPerMm);
         bar.Controls.Add(MakeLabel("Max ms/mm:"));
         bar.Controls.Add(_maxMsPerMm);
         bar.Controls.Add(MakeLabel("Photocell offset (mm):"));
         bar.Controls.Add(_photocellOffset);
-        bar.Controls.Add(MakeLabel("Debounce (ms):"));
+        bar.Controls.Add(MakeLabel("input Debounce (ms):"));
         bar.Controls.Add(_debounceMs);
         bar.Controls.Add(MakeSeparator());
-        bar.Controls.Add(MakeLabel("Calib length (mm):"));
+        bar.Controls.Add(MakeLabel("paper length (mm):"));
         bar.Controls.Add(_calibPaperLength);
         bar.Controls.Add(_calibArmButton);
+        bar.Controls.Add(MakeLabel("Pulses/mm:"));
+        bar.Controls.Add(_pulsesPerMm);
+        
 
         return bar;
     }
@@ -210,36 +232,40 @@ public sealed class MainForm : Form
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 2
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 80));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));     // gun 1
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));     // gun 2
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));   // machine control
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));          // grids + control
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));         // preview
 
-        layout.Controls.Add(BuildGunPanel("Gun 1", _gun1Grid, _gun1Preview, _gun1AddLineButton, _gun1RemoveLineButton), 0, 0);
-        layout.Controls.Add(BuildGunPanel("Gun 2", _gun2Grid, _gun2Preview, _gun2AddLineButton, _gun2RemoveLineButton), 0, 1);
+        layout.Controls.Add(BuildGunGridPanel("Gun 1", _gun1Grid, _gun1AddLineButton, _gun1RemoveLineButton), 0, 0);
+        layout.Controls.Add(BuildGunGridPanel("Gun 2", _gun2Grid, _gun2AddLineButton, _gun2RemoveLineButton), 1, 0);
+        layout.Controls.Add(BuildControlPanel(), 2, 0);
 
-        var controlPanel = BuildControlPanel();
-        layout.Controls.Add(controlPanel, 1, 0);
-        layout.SetRowSpan(controlPanel, 2);
+        var previewGroup = new GroupBox { Text = "Pattern Preview", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(60, 60, 60) };
+        _combinedPreview.Dock = DockStyle.Fill;
+        _combinedPreview.MinimumSize = new Size(100, 40);
+        previewGroup.Controls.Add(_combinedPreview);
+        layout.Controls.Add(previewGroup, 0, 1);
+        layout.SetColumnSpan(previewGroup, 3);
 
         return layout;
     }
 
-    private Control BuildGunPanel(string title, DataGridView grid, PatternPreviewPanel preview, Button addBtn, Button removeBtn)
+    private static Control BuildGunGridPanel(string title, DataGridView grid, Button addBtn, Button removeBtn)
     {
         var group = new GroupBox { Text = title, Dock = DockStyle.Fill, ForeColor = Color.FromArgb(60, 60, 60) };
 
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 1,
             RowCount = 2
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -247,17 +273,12 @@ public sealed class MainForm : Form
         grid.BackgroundColor = Color.White;
         grid.BorderStyle = BorderStyle.FixedSingle;
 
-        preview.Dock = DockStyle.Fill;
-        preview.MinimumSize = new Size(100, 60);
-
         var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         btnPanel.Controls.Add(addBtn);
         btnPanel.Controls.Add(removeBtn);
 
         layout.Controls.Add(grid, 0, 0);
-        layout.Controls.Add(preview, 1, 0);
         layout.Controls.Add(btnPanel, 0, 1);
-        layout.SetColumnSpan(btnPanel, 2);
 
         group.Controls.Add(layout);
         return group;
@@ -308,9 +329,30 @@ public sealed class MainForm : Form
 
     private Control BuildLogPanel()
     {
-        var group = new GroupBox { Text = "Serial Log", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(60, 60, 60) };
-        group.Controls.Add(_logBox);
-        return group;
+        _logPanel = new Panel { Dock = DockStyle.Fill, Height = 28 };
+        _logBox.Visible = false;
+        _logToggleButton.Click += (_, _) => ToggleLog();
+        _logPanel.Controls.Add(_logBox);
+        _logPanel.Controls.Add(_logToggleButton);
+        return _logPanel;
+    }
+
+    private void ToggleLog()
+    {
+        _logExpanded = !_logExpanded;
+        if (_logExpanded)
+        {
+            _logToggleButton.Text = "▼ Serial Log";
+            _logBox.Visible = true;
+            _rootLayout.RowStyles[3] = new RowStyle(SizeType.Absolute, 180);
+        }
+        else
+        {
+            _logToggleButton.Text = "▶ Serial Log";
+            _logBox.Visible = false;
+            _rootLayout.RowStyles[3] = new RowStyle(SizeType.AutoSize);
+        }
+        _rootLayout.PerformLayout();
     }
 
     private static Label MakeLabel(string text) =>
@@ -454,8 +496,9 @@ public sealed class MainForm : Form
             _serial.DiscardOutBuffer();
             _serialPollTimer.Start();
             _connectButton.Text = "Disconnect";
-            _statusLabel.Text = $"Connected ({port})";
-            _statusLabel.ForeColor = Color.Green;
+            _statusLabel.Text = $"  Connected ({port})  ";
+            _statusLabel.ForeColor = Color.White;
+            _statusLabel.BackColor = Color.FromArgb(50, 160, 50);
             AppendLog($"Connected to {port}");
             return true;
         }
@@ -485,7 +528,7 @@ public sealed class MainForm : Form
 
     private void DisconnectSerial()
     {
-        if (_serial is null) { _connectButton.Text = "Connect"; _statusLabel.Text = "Disconnected"; _statusLabel.ForeColor = Color.Gray; return; }
+        if (_serial is null) { _connectButton.Text = "Connect"; _statusLabel.Text = "  Disconnected  "; _statusLabel.ForeColor = Color.White; _statusLabel.BackColor = Color.FromArgb(140, 140, 140); return; }
         try
         {
             _serialPollTimer.Stop();
@@ -498,8 +541,9 @@ public sealed class MainForm : Form
         {
             _serial = null;
             _connectButton.Text = "Connect";
-            _statusLabel.Text = "Disconnected";
-            _statusLabel.ForeColor = Color.Gray;
+            _statusLabel.Text = "  Disconnected  ";
+            _statusLabel.ForeColor = Color.White;
+            _statusLabel.BackColor = Color.FromArgb(140, 140, 140);
             AppendLog("Disconnected");
         }
     }
@@ -777,8 +821,7 @@ public sealed class MainForm : Form
     private void RefreshPreviews()
     {
         var paperLen = (double)_calibPaperLength.Value;
-        _gun1Preview.SetLines(_gun1Lines, paperLen);
-        _gun2Preview.SetLines(_gun2Lines, paperLen);
+        _combinedPreview.SetData(_gun1Lines, _gun2Lines, paperLen);
         RefreshPatternViolationHighlights();
     }
 
@@ -998,28 +1041,32 @@ public sealed class MainForm : Form
 //  PATTERN PREVIEW (double-buffered)
 // ═══════════════════════════════════════════════════════════════
 
-public sealed class PatternPreviewPanel : Panel
+public sealed class CombinedPreviewPanel : Panel
 {
-    private readonly List<PatternLine> _lines = new();
+    private readonly List<PatternLine> _gun1Lines = new();
+    private readonly List<PatternLine> _gun2Lines = new();
+    private double _paperLengthMm = 297.0;
 
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public Color PatternColor { get; set; } = Color.DarkOrange;
+    private static readonly Color Gun1Color = Color.OrangeRed;
+    private static readonly Color Gun2Color = Color.SteelBlue;
+    private const int LineThickness = 16;
+    private const int Gun1Y = 0;   // row index
+    private const int Gun2Y = 1;
 
-    public PatternPreviewPanel()
+    public CombinedPreviewPanel()
     {
         DoubleBuffered = true;
         ResizeRedraw = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
     }
 
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public double PaperLengthMm { get; set; } = 297.0;
-
-    public void SetLines(IEnumerable<PatternLine> lines, double paperLengthMm = 297.0)
+    public void SetData(IEnumerable<PatternLine> gun1, IEnumerable<PatternLine> gun2, double paperLengthMm)
     {
-        _lines.Clear();
-        _lines.AddRange(lines.Select(l => l.Clone()));
-        PaperLengthMm = paperLengthMm;
+        _gun1Lines.Clear();
+        _gun1Lines.AddRange(gun1.Select(l => l.Clone()));
+        _gun2Lines.Clear();
+        _gun2Lines.AddRange(gun2.Select(l => l.Clone()));
+        _paperLengthMm = paperLengthMm;
         Invalidate();
     }
 
@@ -1030,79 +1077,108 @@ public sealed class PatternPreviewPanel : Panel
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
 
         var rect = ClientRectangle;
-        if (rect.Width < 40 || rect.Height < 20) return;
+        if (rect.Width < 40 || rect.Height < 30) return;
 
         using var bg = new SolidBrush(Color.FromArgb(250, 251, 253));
         g.FillRectangle(bg, rect);
 
-        var pad = 8;
-        var chart = new Rectangle(rect.X + pad, rect.Y + pad, rect.Width - pad * 2, rect.Height - pad * 2 - 16);
-        if (chart.Height < 6) return;
+        var pad = 10;
+        var topPad = 22;
+        var chart = new Rectangle(rect.X + pad, rect.Y + topPad, rect.Width - pad * 2, rect.Height - topPad - pad - 18);
+        if (chart.Height < 20) return;
 
-        using var axisPen = new Pen(Color.FromArgb(180, 180, 180), 1);
-        g.DrawLine(axisPen, chart.Left, chart.Bottom, chart.Right, chart.Bottom);
-
-        var paperLen = Math.Max(1.0, PaperLengthMm);
+        // Compute scale
+        var paperLen = Math.Max(1.0, _paperLengthMm);
         var patternMax = 0.0;
-        foreach (var l in _lines) patternMax = Math.Max(patternMax, Math.Max(l.StartMm, l.EndMm));
+        foreach (var l in _gun1Lines) patternMax = Math.Max(patternMax, Math.Max(l.StartMm, l.EndMm));
+        foreach (var l in _gun2Lines) patternMax = Math.Max(patternMax, Math.Max(l.StartMm, l.EndMm));
         var max = Math.Max(paperLen, patternMax * 1.05);
         if (max < 1.0) max = 1.0;
 
-        // Draw end-of-paper line
+        // Axis
+        using var axisPen = new Pen(Color.FromArgb(180, 180, 180), 1);
+        g.DrawLine(axisPen, chart.Left, chart.Bottom, chart.Right, chart.Bottom);
+
+        // End-of-paper dashed line
         var paperX = chart.Left + (float)(paperLen / max) * chart.Width;
         using var paperPen = new Pen(Color.FromArgb(200, 220, 50, 50), 2) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
-        g.DrawLine(paperPen, paperX, chart.Top, paperX, chart.Bottom);
+        g.DrawLine(paperPen, paperX, chart.Top - 4, paperX, chart.Bottom);
 
-        // Shade area beyond paper
+        // Shade beyond paper
         if (paperX < chart.Right - 1)
         {
-            using var beyondBrush = new SolidBrush(Color.FromArgb(30, 255, 0, 0));
+            using var beyondBrush = new SolidBrush(Color.FromArgb(25, 255, 0, 0));
             g.FillRectangle(beyondBrush, paperX, chart.Top, chart.Right - paperX, chart.Height);
         }
 
-        using var fill = new SolidBrush(Color.FromArgb(180, PatternColor));
-        using var fillBeyond = new SolidBrush(Color.FromArgb(180, Color.IndianRed));
-        using var outline = new Pen(Color.FromArgb(220, PatternColor), 1);
-        using var outlineBeyond = new Pen(Color.FromArgb(220, Color.IndianRed), 1);
-        using var labelFont = new Font("Segoe UI", 7F);
-        using var labelBrush = new SolidBrush(Color.FromArgb(100, 100, 100));
+        // Gun rows: split chart height into two lanes
+        var laneH = chart.Height / 2;
+        var gun1CenterY = chart.Top + laneH / 2;
+        var gun2CenterY = chart.Top + laneH + laneH / 2;
 
-        foreach (var line in _lines)
-        {
-            var lo = Math.Min(line.StartMm, line.EndMm);
-            var hi = Math.Max(line.StartMm, line.EndMm);
-            var x1 = chart.Left + (float)(lo / max) * chart.Width;
-            var x2 = chart.Left + (float)(hi / max) * chart.Width;
-            var w = Math.Max(3, x2 - x1);
-            var beyond = hi > paperLen;
-            var r = new RectangleF(x1, chart.Top + 2, w, chart.Height - 2);
-            g.FillRectangle(beyond ? fillBeyond : fill, r);
-            g.DrawRectangle(beyond ? outlineBeyond : outline, r.X, r.Y, r.Width, r.Height);
+        // Lane divider
+        using var lanePen = new Pen(Color.FromArgb(60, 180, 180, 180), 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
+        g.DrawLine(lanePen, chart.Left, chart.Top + laneH, chart.Right, chart.Top + laneH);
 
-            if (w > 28)
-            {
-                var txt = $"{lo:0.#}-{hi:0.#}";
-                var sz = g.MeasureString(txt, labelFont);
-                if (sz.Width < w - 2)
-                    g.DrawString(txt, labelFont, labelBrush, r.X + (w - sz.Width) / 2, r.Y + (r.Height - sz.Height) / 2);
-            }
-        }
+        // Draw gun labels
+        using var labelFont = new Font("Segoe UI", 7.5F, FontStyle.Bold);
+        using var gun1LabelBrush = new SolidBrush(Color.FromArgb(180, Gun1Color));
+        using var gun2LabelBrush = new SolidBrush(Color.FromArgb(180, Gun2Color));
+        g.DrawString("Gun 1", labelFont, gun1LabelBrush, chart.Left, chart.Top - 16);
+        g.DrawString("Gun 2", labelFont, gun2LabelBrush, chart.Left, chart.Top + laneH - 1);
 
+        // Draw pattern lines
+        DrawGunLines(g, _gun1Lines, gun1CenterY, max, paperLen, chart, Gun1Color, labelsBelow: false);
+        DrawGunLines(g, _gun2Lines, gun2CenterY, max, paperLen, chart, Gun2Color, labelsBelow: true);
+
+        // Axis labels
         using var axisFont = new Font("Segoe UI", 7.5F);
         using var axisBrush = new SolidBrush(Color.FromArgb(80, 80, 80));
-        g.DrawString("0", axisFont, axisBrush, chart.Left, chart.Bottom + 1);
+        g.DrawString("0", axisFont, axisBrush, chart.Left, chart.Bottom + 2);
 
-        // Paper length label at the paper line
+        using var paperLabelBrush = new SolidBrush(Color.FromArgb(200, 60, 60));
         var paperStr = $"{paperLen:0.#} mm";
         var paperSz = g.MeasureString(paperStr, axisFont);
-        using var paperLabelBrush = new SolidBrush(Color.FromArgb(200, 60, 60));
-        g.DrawString(paperStr, axisFont, paperLabelBrush, paperX - paperSz.Width / 2, chart.Bottom + 1);
+        g.DrawString(paperStr, axisFont, paperLabelBrush, paperX - paperSz.Width / 2, chart.Bottom + 2);
 
         if (patternMax > paperLen)
         {
             var maxStr = $"{patternMax:0.#} mm";
             var maxSz = g.MeasureString(maxStr, axisFont);
-            g.DrawString(maxStr, axisFont, axisBrush, chart.Right - maxSz.Width, chart.Bottom + 1);
+            g.DrawString(maxStr, axisFont, axisBrush, chart.Right - maxSz.Width, chart.Bottom + 2);
+        }
+    }
+
+    private static void DrawGunLines(Graphics g, List<PatternLine> lines, int centerY, double max, double paperLen, Rectangle chart, Color color, bool labelsBelow)
+    {
+        using var pen = new Pen(color, LineThickness);
+        using var penBeyond = new Pen(Color.IndianRed, LineThickness);
+        using var labelFont = new Font("Segoe UI", 6.5F);
+        using var labelBrush = new SolidBrush(Color.FromArgb(140, 60, 60, 60));
+
+        foreach (var line in lines)
+        {
+            var lo = Math.Min(line.StartMm, line.EndMm);
+            var hi = Math.Max(line.StartMm, line.EndMm);
+            var x1 = chart.Left + (float)(lo / max) * chart.Width;
+            var x2 = chart.Left + (float)(hi / max) * chart.Width;
+            if (x2 - x1 < 2) x2 = x1 + 2;
+            var beyond = hi > paperLen;
+            g.DrawLine(beyond ? penBeyond : pen, x1, centerY, x2, centerY);
+
+            var w = x2 - x1;
+            if (w > 30)
+            {
+                var txt = $"{lo:0.#}-{hi:0.#}";
+                var sz = g.MeasureString(txt, labelFont);
+                if (sz.Width < w)
+                {
+                    var labelY = labelsBelow
+                        ? centerY + LineThickness / 2 + 2
+                        : centerY - LineThickness / 2 - sz.Height - 1;
+                    g.DrawString(txt, labelFont, labelBrush, x1 + (w - sz.Width) / 2, labelY);
+                }
+            }
         }
     }
 }
