@@ -41,6 +41,9 @@ public sealed class MainForm : Form
     private readonly ComboBox _programCombo = new() { Width = 200, DropDownStyle = ComboBoxStyle.DropDown };
     private readonly Button _deleteProgramButton = new() { Text = "Delete", Width = 55 };
 
+    // ── Tooltips ──
+    private readonly ToolTip _toolTip = new() { AutoPopDelay = 10000, InitialDelay = 400, ReshowDelay = 200 };
+
     // ── Config controls ──
     private readonly NumericUpDown _pulsesPerMm = new() { DecimalPlaces = 4, Minimum = 0.0001M, Maximum = 100000M, Value = 10M, Increment = 0.1M, Width = 110 };
     private readonly NumericUpDown _maxMsPerMm = new() { DecimalPlaces = 0, Minimum = 1, Maximum = 60000, Value = 100, Width = 110 };
@@ -129,6 +132,7 @@ public sealed class MainForm : Form
         WireEvents();
         ConfigurePatternGrid(_gun1Grid, _gun1Lines);
         ConfigurePatternGrid(_gun2Grid, _gun2Lines);
+        SetupTooltips();
 
         _gun1Lines.ListChanged += (_, _) => { RefreshPreviews(); MarkPatternChanged(); };
         _gun2Lines.ListChanged += (_, _) => { RefreshPreviews(); MarkPatternChanged(); };
@@ -146,6 +150,39 @@ public sealed class MainForm : Form
         UpdateProgramStateUi();
 
         Shown += (_, _) => TryAutoConnectOnStartup();
+    }
+
+    private void SetupTooltips()
+    {
+        // Config parameters
+        _toolTip.SetToolTip(_pulsesPerMm, "Encoder pulses per millimeter of paper travel.\nSet by calibration or manually.");
+        _toolTip.SetToolTip(_maxMsPerMm, "Maximum time (ms) allowed per mm of movement.\nIf paper moves slower than this, glue guns are blocked to prevent dripping.");
+        _toolTip.SetToolTip(_photocellOffset, "Distance (mm) between the photocell sensor and the glue nozzles.\nPositive = nozzles are downstream of the sensor.");
+        _toolTip.SetToolTip(_debounceMs, "Input debounce time (ms) for the photocell sensor.\nFilters out electrical noise on the signal.");
+        _toolTip.SetToolTip(_calibPaperLength, "Known paper length (mm) used during encoder calibration.\nAlso sets the paper boundary shown in the pattern preview.");
+        _toolTip.SetToolTip(_calibArmButton, "Arm encoder calibration.\nPass a sheet of known length past the photocell to measure pulses/mm.");
+
+        // Machine control
+        _toolTip.SetToolTip(_activateButton, "Activate the system — enables photocell detection and glue pattern firing.");
+        _toolTip.SetToolTip(_deactivateButton, "Deactivate the system — stops all guns and ignores triggers.");
+        _toolTip.SetToolTip(_testOpenGun1Button, "Manually open Gun 1 for testing (30s timeout).");
+        _toolTip.SetToolTip(_testCloseGun1Button, "Manually close Gun 1.");
+        _toolTip.SetToolTip(_testOpenGun2Button, "Manually open Gun 2 for testing (30s timeout).");
+        _toolTip.SetToolTip(_testCloseGun2Button, "Manually close Gun 2.");
+        _toolTip.SetToolTip(_testOpenBothButton, "Manually open both guns for testing (30s timeout).");
+        _toolTip.SetToolTip(_testCloseBothButton, "Manually close both guns.");
+        _toolTip.SetToolTip(_swTriggerButton, "Software trigger — simulates a photocell event to start a glue cycle.\nSystem must be active and encoder must be moving.");
+
+        // Connection
+        _toolTip.SetToolTip(_portCombo, "Select the COM port connected to the Arduino controller.");
+        _toolTip.SetToolTip(_refreshPortsButton, "Refresh the list of available COM ports.");
+        _toolTip.SetToolTip(_connectButton, "Connect or disconnect from the selected COM port.");
+        _toolTip.SetToolTip(_programCombo, "Select or type a program name.\nPrograms store pattern and config settings.");
+        _toolTip.SetToolTip(_deleteProgramButton, "Delete the currently selected program file.");
+
+        // Pattern grids
+        _toolTip.SetToolTip(_gun1Grid, "Glue pattern for Gun 1.\nEach row defines a start and end position (mm) where glue is applied.");
+        _toolTip.SetToolTip(_gun2Grid, "Glue pattern for Gun 2.\nEach row defines a start and end position (mm) where glue is applied.");
     }
 
     // ═══════════════════════════════════════════════════════════════
