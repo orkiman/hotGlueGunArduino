@@ -99,6 +99,19 @@ public sealed class MainForm : Form
     };
     private Panel _logPanel = null!;
     private bool _logExpanded = false;
+    private Panel _adminPanel = null!;
+    private bool _adminExpanded = false;
+    private readonly Button _adminToggleButton = new()
+    {
+        Text = "⚙ Admin ▶",
+        AutoSize = true,
+        FlatStyle = FlatStyle.Flat,
+        BackColor = Color.FromArgb(255, 235, 180),
+        ForeColor = Color.FromArgb(100, 60, 0),
+        Font = new Font("Segoe UI", 8.5F, FontStyle.Bold),
+        Padding = new Padding(6, 2, 6, 2),
+        Margin = new Padding(6, 2, 0, 0)
+    };
     private TableLayoutPanel _rootLayout = null!;
     private readonly System.Windows.Forms.Timer _postConnectTimer = new() { Interval = 2000 };
 
@@ -196,18 +209,20 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Padding = new Padding(6)
         };
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // toolbar
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // config bar
+        _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // admin panel (collapsed)
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // main area
-        _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // log (collapsed by default)
+        _rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // log (collapsed)
 
         _rootLayout.Controls.Add(BuildToolbar(), 0, 0);
         _rootLayout.Controls.Add(BuildConfigBar(), 0, 1);
-        _rootLayout.Controls.Add(BuildMainArea(), 0, 2);
-        _rootLayout.Controls.Add(BuildLogPanel(), 0, 3);
+        _rootLayout.Controls.Add(BuildAdminPanel(), 0, 2);
+        _rootLayout.Controls.Add(BuildMainArea(), 0, 3);
+        _rootLayout.Controls.Add(BuildLogPanel(), 0, 4);
 
         Controls.Add(_rootLayout);
     }
@@ -243,26 +258,79 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
-            WrapContents = true,
+            WrapContents = false,
             Padding = new Padding(0, 0, 0, 2),
             BackColor = Color.FromArgb(235, 237, 242)
         };
 
-        bar.Controls.Add(MakeLabel("Max ms/mm:"));
-        bar.Controls.Add(_maxMsPerMm);
         bar.Controls.Add(MakeLabel("Photocell offset (mm):"));
         bar.Controls.Add(_photocellOffset);
-        bar.Controls.Add(MakeLabel("input Debounce (ms):"));
-        bar.Controls.Add(_debounceMs);
         bar.Controls.Add(MakeSeparator());
-        bar.Controls.Add(MakeLabel("paper length (mm):"));
+        bar.Controls.Add(MakeLabel("Paper length (mm):"));
         bar.Controls.Add(_calibPaperLength);
-        bar.Controls.Add(_calibArmButton);
-        bar.Controls.Add(MakeLabel("Pulses/mm:"));
-        bar.Controls.Add(_pulsesPerMm);
-        
+        bar.Controls.Add(MakeSeparator());
+        bar.Controls.Add(_adminToggleButton);
 
         return bar;
+    }
+
+    private Control BuildAdminPanel()
+    {
+        var toggleBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = false,
+            Height = 28,
+            BackColor = Color.FromArgb(255, 210, 120),
+            Padding = new Padding(4, 2, 4, 2)
+        };
+        var titleLabel = new Label
+        {
+            Text = "⚙  ADMIN SETTINGS",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(100, 50, 0),
+            Margin = new Padding(0, 3, 0, 0)
+        };
+        toggleBar.Controls.Add(titleLabel);
+
+        var adminBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            WrapContents = false,
+            BackColor = Color.FromArgb(255, 248, 225),
+            Padding = new Padding(4, 2, 4, 4)
+        };
+        adminBar.Controls.Add(MakeLabel("Max ms/mm:"));
+        adminBar.Controls.Add(_maxMsPerMm);
+        adminBar.Controls.Add(MakeLabel("Input debounce (ms):"));
+        adminBar.Controls.Add(_debounceMs);
+        adminBar.Controls.Add(MakeSeparator());
+        adminBar.Controls.Add(MakeLabel("Pulses/mm:"));
+        adminBar.Controls.Add(_pulsesPerMm);
+        adminBar.Controls.Add(_calibArmButton);
+        adminBar.Controls.Add(MakeSeparator());
+        adminBar.Controls.Add(_swTriggerButton);
+
+        _adminPanel = new Panel { Dock = DockStyle.Fill, AutoSize = true };
+        adminBar.Visible = false;
+        _adminPanel.Controls.Add(adminBar);
+        _adminPanel.Controls.Add(toggleBar);
+
+        _adminToggleButton.Click += (_, _) => ToggleAdmin();
+
+        return _adminPanel;
+    }
+
+    private void ToggleAdmin()
+    {
+        _adminExpanded = !_adminExpanded;
+        var adminBar = _adminPanel.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+        if (adminBar is not null) adminBar.Visible = _adminExpanded;
+        _adminPanel.Height = _adminExpanded ? _adminPanel.PreferredSize.Height : 28;
+        _adminToggleButton.Text = _adminExpanded ? "⚙ Admin ▼" : "⚙ Admin ▶";
+        _rootLayout.RowStyles[2] = new RowStyle(SizeType.AutoSize);
     }
 
     private Control BuildMainArea()
@@ -356,11 +424,6 @@ public sealed class MainForm : Form
         layout.Controls.Add(_testCloseGun2Button, 1, 3);
         layout.Controls.Add(_testOpenBothButton, 0, 4);
         layout.Controls.Add(_testCloseBothButton, 1, 4);
-        layout.Controls.Add(new Label { Text = " ", AutoSize = true }, 0, 5);
-        _swTriggerButton.Dock = DockStyle.Fill;
-        layout.Controls.Add(_swTriggerButton, 0, 6);
-        layout.SetColumnSpan(_swTriggerButton, 2);
-
         group.Controls.Add(layout);
         return group;
     }
