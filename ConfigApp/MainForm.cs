@@ -100,6 +100,7 @@ public sealed class MainForm : Form
     private Panel _logPanel = null!;
     private bool _logExpanded = false;
     private TableLayoutPanel _rootLayout = null!;
+    private readonly System.Windows.Forms.Timer _postConnectTimer = new() { Interval = 2000 };
 
     // ── State ──
     private SerialPort? _serial;
@@ -437,6 +438,23 @@ public sealed class MainForm : Form
     {
         _refreshPortsButton.Click += (_, _) => RefreshSerialPorts();
         _connectButton.Click += (_, _) => ToggleConnection();
+        _postConnectTimer.Tick += (_, _) =>
+        {
+            _postConnectTimer.Stop();
+            if (_serial?.IsOpen != true) return;
+            SendSetConfig();
+            SendSetPattern(1, _gun1Lines);
+            SendSetPattern(2, _gun2Lines);
+            SendJson(new { cmd = "set_active", active = true });
+            SetActiveIndicator(true);
+            AppendLog("Post-connect: config + patterns sent, system activated.");
+        };
+        _portCombo.SelectedIndexChanged += (_, _) =>
+        {
+            if (_portCombo.SelectedItem is not string port || string.IsNullOrWhiteSpace(port)) return;
+            if (_serial?.IsOpen == true) DisconnectSerial();
+            _ = ConnectSerial(port, showErrors: false);
+        };
 
         _activateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = true }); SetActiveIndicator(true); };
         _deactivateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = false }); SetActiveIndicator(false); };
@@ -536,7 +554,9 @@ public sealed class MainForm : Form
             _statusLabel.Text = $"  Connected ({port})  ";
             _statusLabel.ForeColor = Color.White;
             _statusLabel.BackColor = Color.FromArgb(50, 160, 50);
-            AppendLog($"Connected to {port}");
+            AppendLog($"Connected to {port} — sending config in 2s...");
+            _postConnectTimer.Stop();
+            _postConnectTimer.Start();
             return true;
         }
         catch (Exception ex)
@@ -994,7 +1014,8 @@ public sealed class MainForm : Form
             DebounceMs = (int)_debounceMs.Value
         },
         Gun1Lines = _gun1Lines.Select(l => l.Clone()).ToList(),
-        Gun2Lines = _gun2Lines.Select(l => l.Clone()).ToList()
+        Gun2Lines = _gun2Lines.Select(l => l.Clone()).ToList(),
+        PaperLengthMm = (double)_calibPaperLength.Value
     };
 
     private void ApplyProgramToUi(GlueProgramFile program)
@@ -1010,6 +1031,8 @@ public sealed class MainForm : Form
         }
         ReplaceLines(_gun1Lines, program.Gun1Lines);
         ReplaceLines(_gun2Lines, program.Gun2Lines);
+        if (program.PaperLengthMm > 0)
+            _calibPaperLength.Value = ClampDecimal((decimal)program.PaperLengthMm, _calibPaperLength.Minimum, _calibPaperLength.Maximum);
         RefreshPreviews();
         _suspendDirtyTracking = prev;
     }
@@ -1120,8 +1143,9 @@ public sealed class CombinedPreviewPanel : Panel
         g.FillRectangle(bg, rect);
 
         var pad = 10;
-        var topPad = 22;
-        var chart = new Rectangle(rect.X + pad, rect.Y + topPad, rect.Width - pad * 2, rect.Height - topPad - pad - 18);
+        var topPad = 8;
+        var labelColWidth = 42;  // reserved width for "Gun 1" / "Gun 2" labels
+        var chart = new Rectangle(rect.X + pad + labelColWidth, rect.Y + topPad, rect.Width - pad * 2 - labelColWidth, rect.Height - topPad - pad - 18);
         if (chart.Height < 20) return;
 
         // Compute scale
@@ -1157,16 +1181,24 @@ public sealed class CombinedPreviewPanel : Panel
         using var lanePen = new Pen(Color.FromArgb(60, 180, 180, 180), 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
         g.DrawLine(lanePen, chart.Left, chart.Top + laneH, chart.Right, chart.Top + laneH);
 
-        // Draw gun labels
-        using var labelFont = new Font("Segoe UI", 7.5F, FontStyle.Bold);
-        using var gun1LabelBrush = new SolidBrush(Color.FromArgb(180, Gun1Color));
-        using var gun2LabelBrush = new SolidBrush(Color.FromArgb(180, Gun2Color));
-        g.DrawString("Gun 1", labelFont, gun1LabelBrush, chart.Left, chart.Top - 16);
-        g.DrawString("Gun 2", labelFont, gun2LabelBrush, chart.Left, chart.Top + laneH - 1);
-
         // Draw pattern lines
         DrawGunLines(g, _gun1Lines, gun1CenterY, max, paperLen, chart, Gun1Color, labelsBelow: false);
         DrawGunLines(g, _gun2Lines, gun2CenterY, max, paperLen, chart, Gun2Color, labelsBelow: true);
+
+        // Draw gun labels on top of lines with white backing
+        using var labelFont = new Font("Segoe UI", 7.5F, FontStyle.Bold);
+        using var gun1LabelBrush = new SolidBrush(Gun1Color);
+        using var gun2LabelBrush = new SolidBrush(Gun2Color);
+        using var labelBackBrush = new SolidBrush(Color.FromArgb(210, 250, 251, 253));
+        void DrawLabel(string txt, Brush brush, float x, float y)
+        {
+            var sz = g.MeasureString(txt, labelFont);
+            g.FillRectangle(labelBackBrush, x - 1, y - 1, sz.Width + 2, sz.Height + 1);
+            g.DrawString(txt, labelFont, brush, x, y);
+        }
+        var labelX = rect.X + pad;
+        DrawLabel("Gun 1", gun1LabelBrush, labelX, chart.Top + laneH / 2 - 7);
+        DrawLabel("Gun 2", gun2LabelBrush, labelX, chart.Top + laneH + laneH / 2 - 7);
 
         // Axis labels
         using var axisFont = new Font("Segoe UI", 7.5F);
@@ -1244,6 +1276,7 @@ public sealed class GlueProgramFile
     public DeviceConfig? Config { get; set; } = new();
     public List<PatternLine> Gun1Lines { get; set; } = new();
     public List<PatternLine> Gun2Lines { get; set; } = new();
+    public double PaperLengthMm { get; set; } = 297.0;
 }
 
 public sealed class AppStateFile
