@@ -14,6 +14,7 @@ Thumbs.db
 # .NET build artifacts
 bin/
 obj/
+publish/
 [Bb]uild/
 [Ll]og/
 TestResults/
