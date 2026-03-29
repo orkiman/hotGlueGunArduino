@@ -109,6 +109,11 @@ static uint32_t g_calib_pulse_start = 0;
 static uint32_t g_encoder_report_last_ms = 0;
 static uint32_t g_encoder_reported_total = 0;
 
+// Watchdog
+static constexpr uint32_t WATCHDOG_TIMEOUT_MS = 10000UL;
+static uint32_t g_watchdog_last_cmd_ms = 0;
+static bool g_watchdog_triggered = false;
+
 static uint16_t crc16_update(uint16_t crc, uint8_t data) {
   crc ^= data;
   for (uint8_t i = 0; i < 8; i++) {
@@ -514,6 +519,10 @@ static void applySetPattern(JsonDocument &doc) {
 static void handleJsonLine(const char *line) {
   if (!line || !line[0]) return;
 
+  // Reset watchdog on every received command
+  g_watchdog_last_cmd_ms = millis();
+  g_watchdog_triggered = false;
+
   StaticJsonDocument<2048> doc;
   DeserializationError err = deserializeJson(doc, line);
   if (err) {
@@ -576,6 +585,11 @@ static void handleJsonLine(const char *line) {
     } else {
       sendEvent("error", cmd, "invalid_gun");
     }
+    return;
+  }
+
+  if (strcmp(cmd, "ping") == 0) {
+    sendEvent("ack", cmd);
     return;
   }
 
@@ -651,6 +665,8 @@ void setup() {
   sendEvent("ready");
   g_encoder_report_last_ms = millis();
   g_encoder_reported_total = g_encoder_pulses_total;
+  g_watchdog_last_cmd_ms = millis();
+  g_watchdog_triggered = false;
 
   loadConfig();
   clearSheets();
@@ -667,6 +683,18 @@ void loop() {
 
   serviceSerialJson();
   serviceTestOverrides();
+
+  // Watchdog: deactivate if no command received within timeout
+  if (g_active && !g_watchdog_triggered &&
+      (uint32_t)(now - g_watchdog_last_cmd_ms) >= WATCHDOG_TIMEOUT_MS) {
+    g_active = false;
+    g_watchdog_triggered = true;
+    clearSheets();
+    g_test_override_on[0] = false;
+    g_test_override_on[1] = false;
+    setGunOutputs(false, false);
+    sendEvent("watchdog_timeout");
+  }
 
   uint32_t pulses;
   noInterrupts();

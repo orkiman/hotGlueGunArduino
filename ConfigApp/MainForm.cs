@@ -114,6 +114,9 @@ public sealed class MainForm : Form
     };
     private TableLayoutPanel _rootLayout = null!;
     private readonly System.Windows.Forms.Timer _postConnectTimer = new() { Interval = 2000 };
+    private readonly System.Windows.Forms.Timer _heartbeatTimer = new() { Interval = 3000 };
+    private DateTime _lastArduinoRxTime = DateTime.MinValue;
+    private bool _arduinoNoResponse = false;
 
     // ── State ──
     private SerialPort? _serial;
@@ -449,13 +452,13 @@ public sealed class MainForm : Form
         {
             _logToggleButton.Text = "▼ Serial Log";
             _logBox.Visible = true;
-            _rootLayout.RowStyles[3] = new RowStyle(SizeType.Absolute, 180);
+            _rootLayout.RowStyles[4] = new RowStyle(SizeType.Absolute, 180);
         }
         else
         {
             _logToggleButton.Text = "▶ Serial Log";
             _logBox.Visible = false;
-            _rootLayout.RowStyles[3] = new RowStyle(SizeType.AutoSize);
+            _rootLayout.RowStyles[4] = new RowStyle(SizeType.AutoSize);
         }
         _rootLayout.PerformLayout();
     }
@@ -552,6 +555,22 @@ public sealed class MainForm : Form
 
         _serialPollTimer.Tick += (_, _) => PollSerial();
         _autoSendTimer.Tick += (_, _) => AutoSendIfValid();
+        _heartbeatTimer.Tick += (_, _) =>
+        {
+            if (_serial?.IsOpen != true) return;
+            SendJson(new { cmd = "ping" });
+            if (_lastArduinoRxTime == DateTime.MinValue) return;
+            var silenceSec = (DateTime.Now - _lastArduinoRxTime).TotalSeconds;
+            if (silenceSec > 10 && !_arduinoNoResponse)
+            {
+                _arduinoNoResponse = true;
+                var port = _portCombo.SelectedItem as string ?? "";
+                _statusLabel.Text = $"  ⚠ No response ({port})  ";
+                _statusLabel.BackColor = Color.FromArgb(200, 130, 0);
+                _statusLabel.ForeColor = Color.White;
+                AppendLog("⚠ GUI watchdog: Arduino not responding.");
+            }
+        };
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -622,8 +641,11 @@ public sealed class MainForm : Form
             _statusLabel.ForeColor = Color.White;
             _statusLabel.BackColor = Color.FromArgb(50, 160, 50);
             AppendLog($"Connected to {port} — sending config in 2s...");
+            _lastArduinoRxTime = DateTime.Now;
+            _arduinoNoResponse = false;
             _postConnectTimer.Stop();
             _postConnectTimer.Start();
+            _heartbeatTimer.Start();
             return true;
         }
         catch (Exception ex)
@@ -656,6 +678,7 @@ public sealed class MainForm : Form
         try
         {
             _serialPollTimer.Stop();
+            _heartbeatTimer.Stop();
             _serial.DataReceived -= SerialDataReceived;
             if (_serial.IsOpen) _serial.Close();
             _serial.Dispose();
@@ -684,6 +707,16 @@ public sealed class MainForm : Form
 
     private void AppendSerialText(string text)
     {
+        _lastArduinoRxTime = DateTime.Now;
+        if (_arduinoNoResponse)
+        {
+            _arduinoNoResponse = false;
+            var port = _portCombo.SelectedItem as string ?? "";
+            _statusLabel.Text = $"  Connected ({port})  ";
+            _statusLabel.BackColor = Color.FromArgb(50, 160, 50);
+            _statusLabel.ForeColor = Color.White;
+            AppendLog("Arduino responding again.");
+        }
         _serialRxBuffer.Append(text);
         while (true)
         {
@@ -706,6 +739,13 @@ public sealed class MainForm : Form
                 var root = doc.RootElement;
                 if (!root.TryGetProperty("event", out var eventProp)) continue;
                 var ev = eventProp.GetString();
+
+                if (string.Equals(ev, "watchdog_timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    SetActiveIndicator(false);
+                    AppendLog("⚠ Watchdog timeout: Arduino deactivated (no communication for 10s).");
+                    continue;
+                }
 
                 if (string.Equals(ev, "calib_result", StringComparison.OrdinalIgnoreCase))
                 {
