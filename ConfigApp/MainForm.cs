@@ -132,7 +132,11 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "Hot Glue Gun Controller";
+        var version = (Attribute.GetCustomAttribute(
+            System.Reflection.Assembly.GetExecutingAssembly(),
+            typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+            as System.Reflection.AssemblyInformationalVersionAttribute)?.InformationalVersion ?? "?";
+        Text = $"Hot Glue Gun Controller  v{version}";
         Width = 1280;
         Height = 800;
         WindowState = FormWindowState.Maximized;
