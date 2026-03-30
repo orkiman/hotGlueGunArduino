@@ -87,16 +87,23 @@ public sealed class MainForm : Form
         BackColor = Color.FromArgb(30, 30, 30),
         ForeColor = Color.FromArgb(200, 220, 200)
     };
-    private readonly Button _logToggleButton = new()
+    private readonly CheckBox _logCheck = new()
     {
-        Text = "▶ Serial Log",
-        Dock = DockStyle.Top,
-        Height = 24,
-        FlatStyle = FlatStyle.Flat,
-        BackColor = Color.FromArgb(220, 222, 228),
-        TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(4, 0, 0, 0)
+        Text = "Serial Log",
+        AutoSize = true,
+        Checked = false,
+        Margin = new Padding(4, 2, 12, 0)
     };
+    private readonly CheckBox _encoderLogCheck = new()
+    {
+        Text = "Encoder pulses",
+        AutoSize = true,
+        Checked = false,
+        Margin = new Padding(0, 2, 0, 0)
+    };
+    private bool _isActive = true;
+    private static readonly string _logFilePath = Path.Combine(
+        Directory.GetCurrentDirectory(), "glue_log.txt");
     private Panel _logPanel = null!;
     private bool _logExpanded = false;
     private Panel _adminPanel = null!;
@@ -126,6 +133,8 @@ public sealed class MainForm : Form
     private bool _hasUnsavedChanges;
     private bool _hasUnsentChanges;
     private bool _suspendDirtyTracking;
+    private bool _suppressPortChange;
+    private string _lastSavedPort = string.Empty;
 
     private static readonly string AppStateDirectory = Path.Combine(
         AppDomain.CurrentDomain.BaseDirectory,
@@ -439,24 +448,31 @@ public sealed class MainForm : Form
     {
         _logPanel = new Panel { Dock = DockStyle.Fill, Height = 28 };
         _logBox.Visible = false;
-        _logToggleButton.Click += (_, _) => ToggleLog();
+        _logCheck.CheckedChanged += (_, _) => ToggleLog();
+        var header = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(2, 2, 0, 0)
+        };
+        header.Controls.Add(_logCheck);
+        header.Controls.Add(_encoderLogCheck);
         _logPanel.Controls.Add(_logBox);
-        _logPanel.Controls.Add(_logToggleButton);
+        _logPanel.Controls.Add(header);
         return _logPanel;
     }
 
     private void ToggleLog()
     {
-        _logExpanded = !_logExpanded;
+        _logExpanded = _logCheck.Checked;
         if (_logExpanded)
         {
-            _logToggleButton.Text = "▼ Serial Log";
             _logBox.Visible = true;
             _rootLayout.RowStyles[4] = new RowStyle(SizeType.Absolute, 180);
         }
         else
         {
-            _logToggleButton.Text = "▶ Serial Log";
             _logBox.Visible = false;
             _rootLayout.RowStyles[4] = new RowStyle(SizeType.AutoSize);
         }
@@ -515,19 +531,20 @@ public sealed class MainForm : Form
             SendSetConfig();
             SendSetPattern(1, _gun1Lines);
             SendSetPattern(2, _gun2Lines);
-            SendJson(new { cmd = "set_active", active = true });
-            SetActiveIndicator(true);
-            AppendLog("Post-connect: config + patterns sent, system activated.");
+            SendJson(new { cmd = "set_active", active = _isActive });
+            SetActiveIndicator(_isActive);
+            AppendLog($"Post-connect: config + patterns sent, system {(_isActive ? "activated" : "deactivated")}.");
         };
         _portCombo.SelectedIndexChanged += (_, _) =>
         {
+            if (_suppressPortChange) return;
             if (_portCombo.SelectedItem is not string port || string.IsNullOrWhiteSpace(port)) return;
             if (_serial?.IsOpen == true) DisconnectSerial();
             _ = ConnectSerial(port, showErrors: false);
         };
 
-        _activateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = true }); SetActiveIndicator(true); };
-        _deactivateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = false }); SetActiveIndicator(false); };
+        _activateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = true }); SetActiveIndicator(true); SaveLastAppState(); };
+        _deactivateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = false }); SetActiveIndicator(false); SaveLastAppState(); };
 
         _testOpenGun1Button.Click += (_, _) => SendJson(new { cmd = "test_open", gun = 1, timeout_ms = 30000 });
         _testCloseGun1Button.Click += (_, _) => SendJson(new { cmd = "test_close", gun = 1 });
@@ -558,6 +575,15 @@ public sealed class MainForm : Form
         _heartbeatTimer.Tick += (_, _) =>
         {
             if (_serial?.IsOpen != true) return;
+            var connectedPort = _portCombo.SelectedItem as string ?? "";
+            var availPorts = SerialPort.GetPortNames();
+            if (!string.IsNullOrEmpty(connectedPort) &&
+                !availPorts.Contains(connectedPort, StringComparer.OrdinalIgnoreCase))
+            {
+                AppendLog("⚠ Serial port lost — disconnected.");
+                DisconnectSerial();
+                return;
+            }
             SendJson(new { cmd = "ping" });
             if (_lastArduinoRxTime == DateTime.MinValue) return;
             var silenceSec = (DateTime.Now - _lastArduinoRxTime).TotalSeconds;
@@ -588,23 +614,30 @@ public sealed class MainForm : Form
     {
         try
         {
-            if (_serial?.IsOpen != true) return;
+            if (_serial is null) return;
+            if (!_serial.IsOpen) { DisconnectSerial(); return; }
             var text = _serial.ReadExisting();
             if (!string.IsNullOrEmpty(text)) AppendSerialText(text);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            AppendLog($"⚠ PollSerial exception ({ex.GetType().Name}: {ex.Message}) — disconnecting.");
+            DisconnectSerial();
+        }
     }
 
     private void RefreshSerialPorts()
     {
         var current = _portCombo.SelectedItem?.ToString();
         var ports = SerialPort.GetPortNames().OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
+        _suppressPortChange = true;
         _portCombo.Items.Clear();
         _portCombo.Items.AddRange(ports);
         if (!string.IsNullOrWhiteSpace(current) && ports.Contains(current, StringComparer.OrdinalIgnoreCase))
             _portCombo.SelectedItem = current;
         else if (_portCombo.Items.Count > 0)
             _portCombo.SelectedIndex = 0;
+        _suppressPortChange = false;
     }
 
     private void ToggleConnection()
@@ -631,7 +664,6 @@ public sealed class MainForm : Form
                 RtsEnable = true,
                 Handshake = Handshake.None
             };
-            _serial.DataReceived += SerialDataReceived;
             _serial.Open();
             _serial.DiscardInBuffer();
             _serial.DiscardOutBuffer();
@@ -663,13 +695,9 @@ public sealed class MainForm : Form
     {
         if (_serial?.IsOpen == true) return;
         RefreshSerialPorts();
-        if (_portCombo.SelectedItem is not string port || string.IsNullOrWhiteSpace(port))
-        {
-            if (_portCombo.Items.Count == 0) { AppendLog("Auto-connect skipped: no COM ports."); return; }
-            _portCombo.SelectedIndex = 0;
-            port = _portCombo.SelectedItem?.ToString() ?? string.Empty;
-        }
-        if (!string.IsNullOrWhiteSpace(port)) _ = ConnectSerial(port, showErrors: false);
+        if (string.IsNullOrWhiteSpace(_lastSavedPort)) { AppendLog("Auto-connect skipped: no saved port."); return; }
+        if (!_portCombo.Items.Contains(_lastSavedPort)) { AppendLog($"Auto-connect skipped: {_lastSavedPort} not available."); return; }
+        _ = ConnectSerial(_lastSavedPort, showErrors: false);
     }
 
     private void DisconnectSerial()
@@ -679,7 +707,6 @@ public sealed class MainForm : Form
         {
             _serialPollTimer.Stop();
             _heartbeatTimer.Stop();
-            _serial.DataReceived -= SerialDataReceived;
             if (_serial.IsOpen) _serial.Close();
             _serial.Dispose();
         }
@@ -693,16 +720,6 @@ public sealed class MainForm : Form
             _statusLabel.BackColor = Color.FromArgb(140, 140, 140);
             AppendLog("Disconnected");
         }
-    }
-
-    private void SerialDataReceived(object sender, SerialDataReceivedEventArgs e)
-    {
-        try
-        {
-            var text = _serial?.ReadExisting();
-            if (!string.IsNullOrEmpty(text)) BeginInvoke(() => AppendSerialText(text));
-        }
-        catch { }
     }
 
     private void AppendSerialText(string text)
@@ -725,7 +742,14 @@ public sealed class MainForm : Form
             if (idx < 0) break;
             var line = current.Substring(0, idx).TrimEnd('\r');
             _serialRxBuffer.Remove(0, idx + 1);
-            if (line.Length > 0) { AppendLog($"RX {line}"); HandleIncomingLine(line); }
+            if (line.Length > 0)
+            {
+                var isPingPong = line.Contains("\"ping\"");
+                var isEncoder = line.Contains("\"encoder\"");
+                if (!isPingPong && (!isEncoder || _encoderLogCheck.Checked))
+                    AppendLog($"RX {line}");
+                HandleIncomingLine(line);
+            }
         }
     }
 
@@ -744,6 +768,7 @@ public sealed class MainForm : Form
                 {
                     SetActiveIndicator(false);
                     AppendLog("⚠ Watchdog timeout: Arduino deactivated (no communication for 10s).");
+                    SaveLastAppState();
                     continue;
                 }
 
@@ -878,8 +903,13 @@ public sealed class MainForm : Form
     {
         var json = JsonSerializer.Serialize(payload);
         if (_serial?.IsOpen != true) { AppendLog($"TX (offline) {json}"); return; }
-        try { _serial.WriteLine(json); AppendLog($"TX {json}"); }
-        catch (Exception ex) { AppendLog($"TX ERROR {ex.Message}"); }
+        var isPing = json.Contains("\"ping\"");
+        try { _serial.WriteLine(json); if (!isPing) AppendLog($"TX {json}"); }
+        catch
+        {
+            AppendLog("⚠ Serial port lost — disconnected.");
+            DisconnectSerial();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1093,6 +1123,7 @@ public sealed class MainForm : Form
 
     private void SetActiveIndicator(bool active)
     {
+        _isActive = active;
         if (active)
         {
             _activeIndicator.Text = "  ACTIVE  ";
@@ -1164,7 +1195,8 @@ public sealed class MainForm : Form
                 LastProgramName = _programCombo.Text,
                 CalibrationPaperLengthMm = (double)_calibPaperLength.Value,
                 HasUnsentChanges = _hasUnsentChanges,
-                HasUnsavedChanges = _hasUnsavedChanges
+                HasUnsavedChanges = _hasUnsavedChanges,
+                IsActive = _isActive
             };
             Directory.CreateDirectory(AppStateDirectory);
             File.WriteAllText(AppStateFilePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
@@ -1184,12 +1216,18 @@ public sealed class MainForm : Form
             _suspendDirtyTracking = true;
             if (state.Program is not null) ApplyProgramToUi(state.Program);
             _calibPaperLength.Value = ClampDecimal((decimal)state.CalibrationPaperLengthMm, _calibPaperLength.Minimum, _calibPaperLength.Maximum);
+            _lastSavedPort = state.LastPort ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(state.LastPort) && _portCombo.Items.Contains(state.LastPort))
+            {
+                _suppressPortChange = true;
                 _portCombo.SelectedItem = state.LastPort;
+                _suppressPortChange = false;
+            }
             if (!string.IsNullOrWhiteSpace(state.LastProgramName))
                 _programCombo.Text = state.LastProgramName;
             _hasUnsentChanges = state.HasUnsentChanges;
             _hasUnsavedChanges = state.HasUnsavedChanges;
+            _isActive = state.IsActive;
             _suspendDirtyTracking = false;
             UpdateProgramStateUi();
             RefreshPreviews();
@@ -1200,7 +1238,14 @@ public sealed class MainForm : Form
 
     private void AppendLog(string text)
     {
-        _logBox.AppendText($"{DateTime.Now:HH:mm:ss} | {text}{Environment.NewLine}");
+        var line = $"{DateTime.Now:HH:mm:ss} | {text}";
+        _logBox.AppendText(line + Environment.NewLine);
+        if (_logCheck.Checked)
+        try
+        {
+            File.AppendAllText(_logFilePath, line + Environment.NewLine);
+        }
+        catch { }
     }
 }
 
@@ -1394,4 +1439,5 @@ public sealed class AppStateFile
     public double CalibrationPaperLengthMm { get; set; } = 297.0;
     public bool HasUnsentChanges { get; set; }
     public bool HasUnsavedChanges { get; set; }
+    public bool IsActive { get; set; } = true;
 }

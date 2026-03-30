@@ -686,7 +686,7 @@ void loop() {
 
   // Watchdog: deactivate if no command received within timeout
   if (g_active && !g_watchdog_triggered &&
-      (uint32_t)(now - g_watchdog_last_cmd_ms) >= WATCHDOG_TIMEOUT_MS) {
+      (uint32_t)(millis() - g_watchdog_last_cmd_ms) >= WATCHDOG_TIMEOUT_MS) {
     g_active = false;
     g_watchdog_triggered = true;
     clearSheets();

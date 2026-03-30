@@ -1,0 +1,144 @@
+10:07:43 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:07:44 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900},{"start":1901,"end":1911}]}
+10:07:45 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:07:45 | Auto-sent config + patterns.
+10:07:45 | RX {"event":"ack","cmd":"set_config"}
+10:07:45 | RX {"event":"ack","cmd":"set_pattern"}
+10:07:46 | RX {"event":"ack","cmd":"set_pattern"}
+10:08:01 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:08:02 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900}]}
+10:08:02 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:08:02 | Auto-sent config + patterns.
+10:08:02 | RX {"event":"ack","cmd":"set_config"}
+10:08:02 | RX {"event":"ack","cmd":"set_pattern"}
+10:08:02 | RX {"event":"ack","cmd":"set_pattern"}
+10:08:09 | RX {"event":"encoder","pulses":14042}
+10:08:09 | RX {"event":"encoder","pulses":14580}
+10:08:09 | RX {"event":"encoder","pulses":14742}
+10:08:54 | RX {"event":"encoder","pulses":14782}
+10:08:54 | RX {"event":"encoder","pulses":14990}
+10:08:54 | RX {"event":"encoder","pulses":15030}
+10:09:32 | RX {"event":"encoder","pulses":17265}
+10:09:32 | RX {"event":"encoder","pulses":17374}
+10:09:34 | RX {"event":"encoder","pulses":17432}
+10:09:34 | RX {"event":"encoder","pulses":17490}
+10:09:38 | Disconnected
+10:18:31 | Disconnected
+10:20:33 | TX (offline) {"cmd":"set_active","active":true}
+10:20:48 | Disconnected
+10:21:43 | Disconnected
+10:22:55 | RX _p{"event":"ack","cmd":"ng"}
+10:23:31 | Disconnected
+10:25:39 | Disconnected
+10:25:55 | RX gn{"evet":"ack","cmd":"pig"}
+10:26:51 | Disconnected
+10:28:03 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:28:03 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900},{"start":1901,"end":1911}]}
+10:28:03 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:28:03 | Auto-sent config + patterns.
+10:28:03 | RX {"event":"ack","cmd":"set_config"}
+10:28:03 | RX {"event":"ack","cmd":"set_pattern"}
+10:28:03 | RX {"event":"ack","cmd":"set_pattern"}
+10:28:06 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:28:06 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900}]}
+10:28:06 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:28:06 | Auto-sent config + patterns.
+10:28:06 | RX {"event":"ack","cmd":"set_config"}
+10:28:07 | RX {"event":"ack","cmd":"settern"}
+10:28:07 | RX {"event":"ack","cmd":"set_pattern"}
+10:28:29 | RX {"event":"ack","cmd"}
+10:29:14 | RX {"event":"ack","cmd":"pi}
+10:30:15 | RX {"event":"ack","cmd":"pin
+10:30:29 | RX {"event":"ack","cmd":"p"}
+10:30:38 | RX {"event":"ack","cmd":"pin}
+10:30:59 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:31:00 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900},{"start":1901,"end":1911}]}
+10:31:01 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:31:01 | Auto-sent config + patterns.
+10:31:01 | RX {"event":"ack","cmd":"set_config"}
+10:31:01 | RX {"event":"ack","cmd":"set_pattern"}
+10:31:01 | RX {"event":"ack","cmd":"set_pattern"}
+10:31:24 | RX {"event":"encoder","pulses":329}
+10:31:24 | RX {"event":"encoder","pulses":570}
+10:31:25 | RX {"event":"encoder","lses":572}
+10:31:26 | RX pu{"event":"ack","cmding"}
+10:32:40 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:32:40 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900},{"start":1901,"end":1911},{"start":1912,"end":1922}]}
+10:32:40 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:32:40 | Auto-sent config + patterns.
+10:32:40 | RX {"event":"ack","cmd":"set_config"}
+10:32:40 | RX {"event":"ack","cmd":"set_pattern"}
+10:32:40 | RX {"event":"ack","cmd":"set_pattern"}
+10:32:49 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:32:49 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900},{"start":1901,"end":1911}]}
+10:32:49 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:32:49 | Auto-sent config + patterns.
+10:32:49 | RX {"event":"ack","cmd":"set_config"}
+10:32:50 | RX {"event":"ack","cmd":"set_pattern"}
+10:32:50 | RX {"event":"ack","cmd":"set_pattern"}
+10:32:55 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:32:55 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500},{"start":1000,"end":1900}]}
+10:32:55 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:32:55 | Auto-sent config + patterns.
+10:32:55 | RX {"event":"ack","cmd":"set_config"}
+10:32:55 | RX {"event":"ack","cmd":"set_pattern"}
+10:32:55 | RX {"event":"ack","cmd":"set_pattern"}
+10:33:40 | Disconnected
+10:39:44 | TX (offline) {"cmd":"set_active","active":true}
+10:39:50 | Connected to COM6 — sending config in 2s...
+10:39:52 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:39:52 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500}]}
+10:39:52 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:39:52 | TX {"cmd":"set_active","active":true}
+10:39:52 | Post-connect: config + patterns sent, system activated.
+10:39:52 | RX {"event":"ack","cmd":"set_config"}
+10:39:52 | RX {"event":"ack","cmd":"set_pattern"}
+10:39:52 | RX {"event":"ack","cmd":"set_pattern"}
+10:39:52 | RX {"event":"ack","cmd":"set_active"}
+10:39:53 | Disconnected
+10:39:55 | Connected to COM6 — sending config in 2s...
+10:39:57 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:39:57 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500}]}
+10:39:57 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:39:57 | TX {"cmd":"set_active","active":true}
+10:39:57 | Post-connect: config + patterns sent, system activated.
+10:39:58 | RX {"event":"ack","cmd":"set_config"}
+10:39:58 | RX {"event":"ack","cmd":"set_pattern"}
+10:39:58 | RX {"event":"ack","cmd":"set_pattern"}
+10:39:58 | RX {"event":"ack","cmd":"set_active"}
+10:39:59 | TX {"cmd":"sw_trigger"}
+10:39:59 | RX {"event":"ack","cmd":"sw_trigger"}
+10:40:20 | Disconnected
+10:42:58 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:42:58 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500}]}
+10:42:58 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:42:58 | TX {"cmd":"set_active","active":true}
+10:42:58 | Post-connect: config + patterns sent, system activated.
+10:42:58 | RX {"event":"ack","cmd":"set_config"}
+10:42:58 | RX {"event":"ack","cmd":"set_pattern"}
+10:42:58 | RX {"event":"ack","cmd":"set_pattern"}
+10:42:58 | RX {"event":"ack","cmd":"set_active"}
+10:42:59 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6]
+10:43:02 | [diag] poll: IsOpen=false
+10:43:02 | Disconnected
+10:43:27 | Connected to COM6 — sending config in 2s...
+10:43:29 | TX {"cmd":"set_config","pulses_per_mm":1,"max_ms_per_mm":100,"photocell_offset_mm":0,"debounce_ms":20}
+10:43:29 | TX {"cmd":"set_pattern","gun":1,"lines":[{"start":1,"end":500}]}
+10:43:29 | TX {"cmd":"set_pattern","gun":2,"lines":[]}
+10:43:29 | TX {"cmd":"set_active","active":true}
+10:43:29 | Post-connect: config + patterns sent, system activated.
+10:43:29 | RX {"event":"ack","cmd":"set_config"}
+10:43:29 | RX {"event":"ack","cmd":"set_pattern"}
+10:43:29 | RX {"event":"ack","cmd":"set_pattern"}
+10:43:29 | RX {"event":"ack","cmd":"set_active"}
+10:43:30 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6,COM6]
+10:43:33 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6,COM6]
+10:43:36 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6,COM6]
+10:43:39 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6,COM6]
+10:43:41 | [diag] poll: IsOpen=false
+10:43:41 | Disconnected
+10:44:01 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6]
+10:44:03 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6]
+10:44:06 | [diag] heartbeat: IsOpen=True, port=COM6, available=[COM1,COM3,COM4,COM6]
+10:44:08 | [diag] poll: IsOpen=false
+10:44:08 | Disconnected
