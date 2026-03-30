@@ -420,7 +420,9 @@ public sealed class MainForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         for (int i = 0; i < 8; i++)
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(i >= 2 && i <= 4
+                ? new RowStyle(SizeType.Absolute, 88)
+                : new RowStyle(SizeType.AutoSize));
 
         _activateButton.Dock = DockStyle.Fill;
         _deactivateButton.Dock = DockStyle.Fill;
