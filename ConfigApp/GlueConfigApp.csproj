@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <InformationalVersion>3003261424</InformationalVersion>
+    <InformationalVersion>2704261016</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Hot Glue Gun Controller</Product>
   </PropertyGroup>

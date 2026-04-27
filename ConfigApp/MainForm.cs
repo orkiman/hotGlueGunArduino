@@ -34,7 +34,8 @@ public sealed class MainForm : Form
         ForeColor = Color.White,
         BackColor = Color.FromArgb(200, 60, 60),
         Padding = new Padding(6, 3, 6, 3),
-        Margin = new Padding(6, 2, 0, 0)
+        Margin = new Padding(6, 2, 0, 0),
+        Cursor = Cursors.Hand
     };
 
     // ── Program selector ──
@@ -55,8 +56,6 @@ public sealed class MainForm : Form
     private readonly Button _calibArmButton = new() { Text = "Calibrate Enc" };
 
     // ── Machine control ──
-    private readonly Button _activateButton = new() { Text = "Activate", BackColor = Color.FromArgb(220, 255, 220) };
-    private readonly Button _deactivateButton = new() { Text = "Deactivate", BackColor = Color.FromArgb(255, 220, 220) };
     private readonly Button _testOpenGun1Button = new() { Text = "Test 1" };
     private readonly Button _testCloseGun1Button = new() { Text = "Close 1" };
     private readonly Button _testOpenGun2Button = new() { Text = "Test 2" };
@@ -193,8 +192,7 @@ public sealed class MainForm : Form
         _toolTip.SetToolTip(_calibArmButton, "Arm encoder calibration.\nPass a sheet of known length past the photocell to measure pulses/mm.");
 
         // Machine control
-        _toolTip.SetToolTip(_activateButton, "Activate the system — enables photocell detection and glue pattern firing.");
-        _toolTip.SetToolTip(_deactivateButton, "Deactivate the system — stops all guns and ignores triggers.");
+        _toolTip.SetToolTip(_activeIndicator, "Click to toggle active state.\nActive — photocell detection enabled, glue patterns fire.\nInactive — all guns stopped, triggers ignored.");
         _toolTip.SetToolTip(_testOpenGun1Button, "Manually open Gun 1 for testing (30s timeout).");
         _toolTip.SetToolTip(_testCloseGun1Button, "Manually close Gun 1.");
         _toolTip.SetToolTip(_testOpenGun2Button, "Manually open Gun 2 for testing (30s timeout).");
@@ -424,8 +422,6 @@ public sealed class MainForm : Form
                 ? new RowStyle(SizeType.Absolute, 88)
                 : new RowStyle(SizeType.AutoSize));
 
-        _activateButton.Dock = DockStyle.Fill;
-        _deactivateButton.Dock = DockStyle.Fill;
         _testOpenGun1Button.Dock = DockStyle.Fill;
         _testCloseGun1Button.Dock = DockStyle.Fill;
         _testOpenGun2Button.Dock = DockStyle.Fill;
@@ -433,9 +429,6 @@ public sealed class MainForm : Form
         _testOpenBothButton.Dock = DockStyle.Fill;
         _testCloseBothButton.Dock = DockStyle.Fill;
 
-        layout.Controls.Add(_activateButton, 0, 0);
-        layout.Controls.Add(_deactivateButton, 1, 0);
-        layout.Controls.Add(new Label { Text = " ", AutoSize = true }, 0, 1);
         layout.Controls.Add(_testOpenGun1Button, 0, 2);
         layout.Controls.Add(_testCloseGun1Button, 1, 2);
         layout.Controls.Add(_testOpenGun2Button, 0, 3);
@@ -545,8 +538,13 @@ public sealed class MainForm : Form
             _ = ConnectSerial(port, showErrors: false);
         };
 
-        _activateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = true }); SetActiveIndicator(true); SaveLastAppState(); };
-        _deactivateButton.Click += (_, _) => { SendJson(new { cmd = "set_active", active = false }); SetActiveIndicator(false); SaveLastAppState(); };
+        _activeIndicator.Click += (_, _) =>
+        {
+            var next = !_isActive;
+            SendJson(new { cmd = "set_active", active = next });
+            SetActiveIndicator(next);
+            SaveLastAppState();
+        };
 
         _testOpenGun1Button.Click += (_, _) => SendJson(new { cmd = "test_open", gun = 1, timeout_ms = 30000 });
         _testCloseGun1Button.Click += (_, _) => SendJson(new { cmd = "test_close", gun = 1 });
@@ -567,6 +565,19 @@ public sealed class MainForm : Form
 
         _gun1Grid.CellEndEdit += (_, _) => { SortPattern(_gun1Lines); RefreshPreviews(); MarkPatternChanged(); };
         _gun2Grid.CellEndEdit += (_, _) => { SortPattern(_gun2Lines); RefreshPreviews(); MarkPatternChanged(); };
+
+        _combinedPreview.LineDragging += gun =>
+        {
+            (gun == 1 ? _gun1Lines : _gun2Lines).ResetBindings();
+        };
+        _combinedPreview.LineDragEnded += gun =>
+        {
+            var lines = gun == 1 ? _gun1Lines : _gun2Lines;
+            SortPattern(lines);
+            lines.ResetBindings();
+            RefreshPatternViolationHighlights();
+            MarkPatternChanged();
+        };
         _gun1Grid.CellValueChanged += (_, _) => { RefreshPreviews(); MarkPatternChanged(); };
         _gun2Grid.CellValueChanged += (_, _) => { RefreshPreviews(); MarkPatternChanged(); };
         _gun1Grid.DataError += (_, e) => e.ThrowException = false;
@@ -1257,15 +1268,33 @@ public sealed class MainForm : Form
 
 public sealed class CombinedPreviewPanel : Panel
 {
-    private readonly List<PatternLine> _gun1Lines = new();
-    private readonly List<PatternLine> _gun2Lines = new();
+    private IList<PatternLine> _gun1Lines = new List<PatternLine>();
+    private IList<PatternLine> _gun2Lines = new List<PatternLine>();
     private double _paperLengthMm = 297.0;
 
     private static readonly Color Gun1Color = Color.OrangeRed;
     private static readonly Color Gun2Color = Color.SteelBlue;
     private const int LineThickness = 16;
-    private const int Gun1Y = 0;   // row index
-    private const int Gun2Y = 1;
+    private const int EdgeHitPx = 6;
+
+    // Cached layout from last paint (used for hit-testing)
+    private Rectangle _chartRect;
+    private double _currentMaxMm = 1.0;
+    private int _gun1CenterY, _gun2CenterY;
+
+    // Drag state
+    private enum DragMode { None, Left, Right, Move }
+    private int _dragGun;          // 1 or 2
+    private int _dragLineIdx = -1;
+    private DragMode _dragMode = DragMode.None;
+    private double _dragGrabMm;    // mm where the mouse grabbed
+    private double _dragOrigStart;
+    private double _dragOrigEnd;
+
+    /// <summary>Fires continuously while a line is being dragged (argument = gun number).</summary>
+    public event Action<int>? LineDragging;
+    /// <summary>Fires once when a drag ends (argument = gun number).</summary>
+    public event Action<int>? LineDragEnded;
 
     public CombinedPreviewPanel()
     {
@@ -1274,14 +1303,124 @@ public sealed class CombinedPreviewPanel : Panel
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
     }
 
-    public void SetData(IEnumerable<PatternLine> gun1, IEnumerable<PatternLine> gun2, double paperLengthMm)
+    public void SetData(IList<PatternLine> gun1, IList<PatternLine> gun2, double paperLengthMm)
     {
-        _gun1Lines.Clear();
-        _gun1Lines.AddRange(gun1.Select(l => l.Clone()));
-        _gun2Lines.Clear();
-        _gun2Lines.AddRange(gun2.Select(l => l.Clone()));
+        _gun1Lines = gun1;
+        _gun2Lines = gun2;
         _paperLengthMm = paperLengthMm;
         Invalidate();
+    }
+
+    private float MmToX(double mm) => _chartRect.Left + (float)(mm / _currentMaxMm) * _chartRect.Width;
+    private double XToMm(int x) => (x - _chartRect.Left) * _currentMaxMm / Math.Max(1, _chartRect.Width);
+
+    private bool HitTest(Point p, out int gun, out int lineIdx, out DragMode mode)
+    {
+        gun = 0; lineIdx = -1; mode = DragMode.None;
+        if (_chartRect.Width <= 0) return false;
+
+        IList<PatternLine>? lines = null;
+        int verticalTol = LineThickness / 2 + 3;
+        if (Math.Abs(p.Y - _gun1CenterY) <= verticalTol) { gun = 1; lines = _gun1Lines; }
+        else if (Math.Abs(p.Y - _gun2CenterY) <= verticalTol) { gun = 2; lines = _gun2Lines; }
+        else return false;
+
+        // Prefer edge hits; scan all lines and pick best match
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var l = lines[i];
+            var lo = Math.Min(l.StartMm, l.EndMm);
+            var hi = Math.Max(l.StartMm, l.EndMm);
+            var x1 = MmToX(lo);
+            var x2 = MmToX(hi);
+            if (Math.Abs(p.X - x1) <= EdgeHitPx) { lineIdx = i; mode = DragMode.Left; return true; }
+            if (Math.Abs(p.X - x2) <= EdgeHitPx) { lineIdx = i; mode = DragMode.Right; return true; }
+        }
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var l = lines[i];
+            var lo = Math.Min(l.StartMm, l.EndMm);
+            var hi = Math.Max(l.StartMm, l.EndMm);
+            var x1 = MmToX(lo);
+            var x2 = MmToX(hi);
+            if (p.X >= x1 && p.X <= x2) { lineIdx = i; mode = DragMode.Move; return true; }
+        }
+        return false;
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (_dragMode != DragMode.None)
+        {
+            var lines = _dragGun == 1 ? _gun1Lines : _gun2Lines;
+            if (_dragLineIdx < 0 || _dragLineIdx >= lines.Count) return;
+            var line = lines[_dragLineIdx];
+            var curMm = Math.Max(0, XToMm(e.X));
+            curMm = Math.Round(curMm, 0);
+            switch (_dragMode)
+            {
+                case DragMode.Left:
+                    if (line.StartMm <= line.EndMm) line.StartMm = Math.Min(curMm, line.EndMm);
+                    else line.EndMm = Math.Min(curMm, line.StartMm);
+                    break;
+                case DragMode.Right:
+                    if (line.StartMm <= line.EndMm) line.EndMm = Math.Max(curMm, line.StartMm);
+                    else line.StartMm = Math.Max(curMm, line.EndMm);
+                    break;
+                case DragMode.Move:
+                    var delta = curMm - _dragGrabMm;
+                    var newStart = _dragOrigStart + delta;
+                    var newEnd = _dragOrigEnd + delta;
+                    var lo = Math.Min(newStart, newEnd);
+                    if (lo < 0) { newStart -= lo; newEnd -= lo; }
+                    line.StartMm = Math.Round(newStart, 0);
+                    line.EndMm = Math.Round(newEnd, 0);
+                    break;
+            }
+            Invalidate();
+            LineDragging?.Invoke(_dragGun);
+            return;
+        }
+
+        // Update cursor based on hit test
+        if (HitTest(e.Location, out _, out _, out var mode))
+            Cursor = mode == DragMode.Move ? Cursors.SizeAll : Cursors.SizeWE;
+        else
+            Cursor = Cursors.Default;
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Button != MouseButtons.Left) return;
+        if (!HitTest(e.Location, out var gun, out var idx, out var mode)) return;
+        var lines = gun == 1 ? _gun1Lines : _gun2Lines;
+        if (idx < 0 || idx >= lines.Count) return;
+        _dragGun = gun;
+        _dragLineIdx = idx;
+        _dragMode = mode;
+        _dragGrabMm = Math.Round(XToMm(e.X), 0);
+        _dragOrigStart = lines[idx].StartMm;
+        _dragOrigEnd = lines[idx].EndMm;
+        Capture = true;
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (_dragMode == DragMode.None) return;
+        var gun = _dragGun;
+        _dragMode = DragMode.None;
+        _dragLineIdx = -1;
+        Capture = false;
+        LineDragEnded?.Invoke(gun);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        if (_dragMode == DragMode.None) Cursor = Cursors.Default;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -1310,6 +1449,10 @@ public sealed class CombinedPreviewPanel : Panel
         var max = Math.Max(paperLen, patternMax * 1.05);
         if (max < 1.0) max = 1.0;
 
+        // Cache for hit-testing
+        _chartRect = chart;
+        _currentMaxMm = max;
+
         // Axis
         using var axisPen = new Pen(Color.FromArgb(180, 180, 180), 1);
         g.DrawLine(axisPen, chart.Left, chart.Bottom, chart.Right, chart.Bottom);
@@ -1330,6 +1473,8 @@ public sealed class CombinedPreviewPanel : Panel
         var laneH = chart.Height / 2;
         var gun1CenterY = chart.Top + laneH / 2;
         var gun2CenterY = chart.Top + laneH + laneH / 2;
+        _gun1CenterY = gun1CenterY;
+        _gun2CenterY = gun2CenterY;
 
         // Lane divider
         using var lanePen = new Pen(Color.FromArgb(60, 180, 180, 180), 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
@@ -1372,7 +1517,7 @@ public sealed class CombinedPreviewPanel : Panel
         }
     }
 
-    private static void DrawGunLines(Graphics g, List<PatternLine> lines, int centerY, double max, double paperLen, Rectangle chart, Color color, bool labelsBelow)
+    private static void DrawGunLines(Graphics g, IList<PatternLine> lines, int centerY, double max, double paperLen, Rectangle chart, Color color, bool labelsBelow)
     {
         using var pen = new Pen(color, LineThickness);
         using var penBeyond = new Pen(Color.IndianRed, LineThickness);
